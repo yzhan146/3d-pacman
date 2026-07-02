@@ -1,0 +1,19 @@
+{
+  "name": "3d-pacman",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "3D Pac-Man on a rotating cube world, built with Three.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test:topology": "node test/topology.test.mjs"
+  },
+  "dependencies": {
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "vite": "^7.0.0"
+  }
+}
