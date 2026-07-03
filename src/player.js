@@ -18,6 +18,7 @@ export class Player {
     this.mouth = 0;
     this._curFrame = -1;
     this.alive = true;
+    this._desiredHeading = 0;
 
     this._buildMesh();
     this.syncTransform();
@@ -162,19 +163,21 @@ export class Player {
     this.mesh.quaternion.setFromRotationMatrix(m);
   }
 
-  update(dt, input, world, moving, mouseDX = 0) {
-    this.heading += mouseDX * 0.0026;
-
+  update(dt, move, world, cameraForwardWorld, cameraRightWorld) {
     let isMoving = false;
-    if (moving && !world.rotating) {
-      const { f, s } = input.moveVector();
-      if (f !== 0 || s !== 0) {
-        const sh = Math.sin(this.heading), ch = Math.cos(this.heading);
-        let du = f * sh + s * ch;
-        let dv = f * ch - s * sh;
+    if (!world.rotating) {
+      const { f, s } = move;
+      if ((f !== 0 || s !== 0) && cameraForwardWorld && cameraRightWorld) {
+        const desiredWorld = cameraForwardWorld.clone().multiplyScalar(f).addScaledVector(cameraRightWorld, s);
+        const desiredLocal = desiredWorld.applyQuaternion(this.group.quaternion.clone().invert());
+        let du = desiredLocal.dot(FACES[this.face].r);
+        let dv = desiredLocal.dot(FACES[this.face].u);
         const len = Math.hypot(du, dv) || 1;
         const step = (PLAYER_SPEED / CELL) * dt;
         du = du / len * step; dv = dv / len * step;
+        this._desiredHeading = Math.atan2(du, dv);
+        const diff = Math.atan2(Math.sin(this._desiredHeading - this.heading), Math.cos(this._desiredHeading - this.heading));
+        this.heading += diff * Math.min(1, dt * 14);
         this.u = this._resolveX(this.u + du, this.v);
         this.v = this._resolveY(this.v + dv, this.u);
         this.mouth = (this.mouth + dt * 8) % (Math.PI * 2);

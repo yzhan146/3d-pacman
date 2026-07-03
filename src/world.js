@@ -119,6 +119,7 @@ export class World {
   _buildWalls() {
     const geo = new THREE.BoxGeometry(CELL, WALL_HEIGHT, CELL);
     this.walls = new THREE.Group();
+    this.wallMeshes = {};
     const dummy = new THREE.Object3D();
     const q = new THREE.Quaternion();
     const pos = new THREE.Vector3();
@@ -153,6 +154,7 @@ export class World {
         inst.setMatrixAt(i++, dummy.matrix);
       }
       inst.instanceMatrix.needsUpdate = true;
+      this.wallMeshes[id] = inst;
       this.walls.add(inst);
     }
     this.group.add(this.walls);
@@ -264,6 +266,7 @@ export class World {
     reg.eaten = true;
     this.remaining--;
     this.faceRemaining[reg.face]--;
+    if (this.faceRemaining[reg.face] === 0) this._markFaceCleared(reg.face);
     const inst = reg.list === 'dot' ? this.dotInst : this.powInst;
     this._dummy.scale.set(0, 0, 0);
     this._dummy.position.set(0, 0, 0);
@@ -272,6 +275,15 @@ export class World {
     inst.setMatrixAt(reg.idx, this._dummy.matrix);
     inst.instanceMatrix.needsUpdate = true;
     return reg.kind;
+  }
+
+  _markFaceCleared(faceId) {
+    const inst = this.wallMeshes?.[faceId];
+    if (!inst) return;
+    const mat = inst.material;
+    const base = mat.color.clone();
+    mat.emissive = base.clone().multiplyScalar(0.28);
+    mat.emissiveIntensity = 0.32;
   }
 
   startRotation(faceId) {

@@ -209,11 +209,13 @@ class Game {
 
   update(dt) {
     const { dx, dy } = this.input.consumeMouse();
+    const move = this.input.moveVector();
+    if (this.player) this.followCam.applyInput(dx, dy);
     this.background.update(dt);
     this.world && this.world.update(dt);
 
     if (this.state === 'playing') {
-      this.player.update(dt, this.input, this.world, true, dx);
+      this.player.update(dt, move, this.world, this.followCam.getFlatForward(new THREE.Vector3()), this.followCam.getFlatRight(new THREE.Vector3()));
       this._eatPellets();
       if (this.state !== 'playing') { /* level cleared during eat */ }
       else {
@@ -226,7 +228,7 @@ class Game {
         }
       }
     } else if (this.state === 'ready') {
-      this.player.update(dt, this.input, this.world, false, dx);
+      this.player.update(dt, { f: 0, s: 0 }, this.world, this.followCam.getFlatForward(new THREE.Vector3()), this.followCam.getFlatRight(new THREE.Vector3()));
       this.timer -= dt;
       if (this.timer <= 0) { this.state = 'playing'; this.hud.hideMessage(); }
     } else if (this.state === 'dying') {
@@ -257,7 +259,7 @@ class Game {
 
     if (this.player) {
       this.world.setPlayerCell(this.player.face, this.player.cellX, this.player.cellY);
-      this.followCam.update(this.player, dt, dy);
+      this.followCam.update(this.player, dt);
       // follow light: a soft pool directly above the player in world space
       const pp = this.player.getWorldPosition(new THREE.Vector3());
       this.followLight.position.set(pp.x, pp.y + 45, pp.z);

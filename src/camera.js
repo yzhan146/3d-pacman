@@ -7,36 +7,53 @@ const HEIGHT = 9;
 const LOOK_AHEAD = 3;
 
 const _playerPos = new THREE.Vector3();
-const _fwd = new THREE.Vector3();
 const _up = new THREE.Vector3(0, 1, 0);
 const _desired = new THREE.Vector3();
 const _look = new THREE.Vector3();
+const _camFwd = new THREE.Vector3();
+const _camRight = new THREE.Vector3();
 
 export class FollowCamera {
   constructor(camera) {
     this.camera = camera;
     this.initialized = false;
     this.pitch = 0.0; // adjustable via mouse dy
+    this.yaw = Math.PI;
   }
 
   snap(player) {
+    player.worldForward(_camFwd);
+    this.yaw = Math.atan2(_camFwd.x, -_camFwd.z);
     this._compute(player, _desired, _look);
     this.camera.position.copy(_desired);
     this.camera.lookAt(_look);
     this.initialized = true;
   }
 
-  _compute(player, outPos, outLook) {
-    player.getWorldPosition(_playerPos);
-    player.worldForward(_fwd);
-    outPos.copy(_playerPos)
-      .addScaledVector(_fwd, -DIST)
-      .addScaledVector(_up, HEIGHT + this.pitch * 6);
-    outLook.copy(_playerPos).addScaledVector(_fwd, LOOK_AHEAD).addScaledVector(_up, 1.5);
+  applyInput(mouseDX = 0, mouseDY = 0) {
+    this.yaw += mouseDX * 0.0026;
+    this.pitch = THREE.MathUtils.clamp(this.pitch + mouseDY * 0.0015, -0.6, 0.8);
   }
 
-  update(player, dt, mouseDY = 0) {
-    this.pitch = THREE.MathUtils.clamp(this.pitch + mouseDY * 0.0015, -0.6, 0.8);
+  getFlatForward(out = new THREE.Vector3()) {
+    return out.set(Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
+  }
+
+  getFlatRight(out = new THREE.Vector3()) {
+    this.getFlatForward(_camFwd);
+    return out.crossVectors(_camFwd, _up).normalize();
+  }
+
+  _compute(player, outPos, outLook) {
+    player.getWorldPosition(_playerPos);
+    this.getFlatForward(_camFwd);
+    outPos.copy(_playerPos)
+      .addScaledVector(_camFwd, -DIST)
+      .addScaledVector(_up, HEIGHT + this.pitch * 6);
+    outLook.copy(_playerPos).addScaledVector(_camFwd, LOOK_AHEAD).addScaledVector(_up, 1.5 + this.pitch * 2.2);
+  }
+
+  update(player, dt) {
     if (!this.initialized) { this.snap(player); return; }
     this._compute(player, _desired, _look);
     const k = 1 - Math.pow(0.0016, dt); // frame-rate independent smoothing
