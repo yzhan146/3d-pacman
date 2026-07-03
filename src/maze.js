@@ -1,6 +1,5 @@
-// Per-face maze generation with guaranteed portal connectivity. Level 1 uses the
-// original cube layout; Level 2 reuses the same pellet/chase logic on triangular
-// faces for the tetrahedron stage.
+// Per-face maze generation with guaranteed portal connectivity. Level 1 uses a
+// dense cube maze; Level 2 uses a readable ring+cross arena (also on the cube).
 import { GRID, MID } from './config.js';
 
 export const WALL = 0;
@@ -74,37 +73,53 @@ export function generateFace(seed) {
   return buildPellets(grid, pickPowerCells(grid));
 }
 
-function generateTriangleFace(seed, topology) {
-  const rnd = mulberry32(seed);
-  const base = generateFace(seed).grid;
+// Level 2 face: a readable main-route arena on a square face. Every face keeps a
+// central cross (reaching all four edge portals — the corridors hazards live on)
+// plus an outer ring, but the four quadrants between them are decorated with a
+// per-face variant so the layouts don't all look like an identical cross.
+function generateRouteFace(seed, variant = 0) {
   const grid = Array.from({ length: GRID }, () => new Array(GRID).fill(WALL));
-  for (let y = 0; y < GRID; y++) {
-    for (let x = 0; x < GRID; x++) {
-      if (!topology.isCellUsable('TA', x, y)) continue;
-      grid[y][x] = base[y][x];
-    }
+
+  // Outer ring corridor.
+  for (let i = 1; i <= GRID - 2; i++) {
+    grid[1][i] = PATH;
+    grid[GRID - 2][i] = PATH;
+    grid[i][1] = PATH;
+    grid[i][GRID - 2] = PATH;
+  }
+  // Central cross, reaching the four edge-midpoint portals.
+  for (let i = 0; i < GRID; i++) {
+    grid[MID][i] = PATH;
+    grid[i][MID] = PATH;
   }
 
-  // Strong central backbone so every face remains readable despite the new shape.
-  for (let y = 0; y <= MID; y++) grid[y][MID] = PATH;
-  for (let x = 0; x < GRID; x++) grid[MID][x] = PATH;
-
-  // Re-open any isolated pockets by carving toward the center line.
-  for (let y = 0; y <= MID; y++) {
-    for (let x = 0; x < GRID; x++) {
-      if (!topology.isCellUsable('TA', x, y)) continue;
-      if (grid[y][x] === PATH) continue;
-      if ((x + y + Math.floor(rnd() * 3)) % 5 === 0) grid[y][x] = PATH;
-    }
+  // Decorate the four quadrant blocks (3x3 interiors) for visual variety.
+  const styles = ['solid', 'rooms', 'pillar', 'corners', 'rooms', 'pillar'];
+  const style = styles[variant % styles.length];
+  for (const [x0, y0] of [[2, 2], [GRID - 4, 2], [2, GRID - 4], [GRID - 4, GRID - 4]]) {
+    decorateQuadrant(grid, x0, y0, style);
   }
 
-  grid[0][MID] = PATH;
-  grid[MID][0] = PATH;
-  grid[MID][GRID - 1] = PATH;
   grid[MID][MID] = PATH;
-  grid[MID - 1][MID] = PATH;
+  carvePortalClearance(grid);
+  pruneUnreachable(grid, null, MID, MID);
 
-  return buildPellets(grid, trianglePowerCells(topology));
+  return buildPellets(grid, []); // no power pellets in the ghost-free dodge stage
+}
+
+function decorateQuadrant(grid, x0, y0, style) {
+  if (style === 'solid') return; // leave as wall
+  for (let dy = 0; dy < 3; dy++) {
+    for (let dx = 0; dx < 3; dx++) grid[y0 + dy][x0 + dx] = PATH;
+  }
+  if (style === 'pillar') {
+    grid[y0 + 1][x0 + 1] = WALL;
+  } else if (style === 'corners') {
+    grid[y0][x0] = WALL;
+    grid[y0][x0 + 2] = WALL;
+    grid[y0 + 2][x0] = WALL;
+    grid[y0 + 2][x0 + 2] = WALL;
+  }
 }
 
 function buildPellets(grid, powerCells) {
@@ -164,15 +179,26 @@ function pickPowerCells(grid) {
   return nearestPathCells(grid, corners);
 }
 
-function trianglePowerCells(topology) {
-  const anchors = [[MID, 1], [2, MID - 1], [GRID - 3, MID - 1], [MID, MID - 2]];
-  const grid = Array.from({ length: GRID }, () => new Array(GRID).fill(PATH));
-  for (let y = 0; y < GRID; y++) {
-    for (let x = 0; x < GRID; x++) {
-      if (!topology.isCellUsable('TA', x, y)) grid[y][x] = WALL;
+function pruneUnreachable(grid, usable, sx, sy) {
+  const seen = Array.from({ length: GRID }, () => new Array(GRID).fill(false));
+  const stack = [[sx, sy]];
+  seen[sy][sx] = true;
+  while (stack.length) {
+    const [cx, cy] = stack.pop();
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = cx + dx;
+      const ny = cy + dy;
+      if (nx < 0 || nx >= GRID || ny < 0 || ny >= GRID) continue;
+      if (seen[ny][nx] || grid[ny][nx] !== PATH) continue;
+      seen[ny][nx] = true;
+      stack.push([nx, ny]);
     }
   }
-  return nearestPathCells(grid, anchors);
+  for (let y = 0; y < GRID; y++) {
+    for (let x = 0; x < GRID; x++) {
+      if (grid[y][x] === PATH && !seen[y][x]) grid[y][x] = WALL;
+    }
+  }
 }
 
 function nearestPathCells(grid, anchors) {
@@ -189,13 +215,13 @@ function nearestPathCells(grid, anchors) {
   return out;
 }
 
-export function generateWorld(baseSeed = 1234, topology) {
+export function generateWorld(baseSeed = 1234, topology, mechanicSet = 'level1') {
   const faces = {};
   let total = 0;
   topology.faceIds.forEach((id, i) => {
-    const f = topology.kind === 'tetra'
-      ? generateTriangleFace(baseSeed + i * 97 + 7, topology)
-      : generateFace(baseSeed + i * 97 + 7);
+    const f = mechanicSet === 'level1'
+      ? generateFace(baseSeed + i * 97 + 7)
+      : generateRouteFace(baseSeed + i * 97 + 7, i);
     faces[id] = f;
     total += f.dotCount;
   });

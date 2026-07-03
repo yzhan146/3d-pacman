@@ -18,7 +18,8 @@ export class Input {
 
   _overlayVisible() {
     const o = document.getElementById('overlay');
-    return o && !o.classList.contains('hidden');
+    const p = document.getElementById('pause-overlay');
+    return (o && !o.classList.contains('hidden')) || (p && p.classList.contains('show'));
   }
 
   _bindKeyboard() {
@@ -74,9 +75,6 @@ export class Input {
     });
     document.body.appendChild(this.joyBase);
     document.body.appendChild(this.joyKnob);
-
-    const hint = document.querySelector('.hint');
-    if (hint) hint.textContent = '左半屏拖动摇杆移动 · 右半屏拖动转视角 · 按住回头按钮快速看身后';
 
     this.lookBehindBtn = document.createElement('div');
     this.lookBehindBtn.id = 'look-behind-btn';

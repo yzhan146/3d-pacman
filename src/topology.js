@@ -10,7 +10,6 @@ import {
   edgeInfo
 } from './cube.js';
 import { GRID, MID } from './config.js';
-import { tetraTopology } from './tetra.js';
 
 function cubeGetEdgePortalEdge(_faceId, x, y) {
   if (x === 0 && y === MID) return 'L';
@@ -65,21 +64,18 @@ export const cubeTopology = {
   miniLocal: cubeMiniLocal
 };
 
+// Two levels: L1 (classic, ghosts) and L2 (ghost-free skill sampler: windmills,
+// rolling ball, hammers, ice, conveyors). Clearing L2 completes the game.
 export function specForLevel(level) {
-  if (level <= 1) {
-    return {
-      id: 'cube-level-1',
-      topology: cubeTopology,
-      startFace: cubeTopology.startFace,
-      ghostFaces: cubeTopology.ghostFaces,
-      mechanicSet: 'level1'
-    };
-  }
+  const mechanicSet = level <= 1 ? 'level1' : 'level2';
   return {
-    id: 'tetra-level-2',
-    topology: tetraTopology,
-    startFace: tetraTopology.startFace,
-    ghostFaces: tetraTopology.ghostFaces,
-    mechanicSet: 'level2'
+    id: 'cube-' + mechanicSet,
+    topology: cubeTopology,
+    startFace: cubeTopology.startFace,
+    ghostFaces: cubeTopology.ghostFaces,
+    mechanicSet,
+    ghostsEnabled: mechanicSet === 'level1'
   };
 }
+
+export const FINAL_LEVEL = 2;

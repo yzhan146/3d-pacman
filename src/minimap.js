@@ -36,22 +36,15 @@ export class MiniMap {
     for (const id of this.topology.faceIds) {
       const mat = new THREE.MeshBasicMaterial({ color: 0x1b2350, transparent: true, opacity: 0.9, side: THREE.DoubleSide });
       this.faceMats[id] = mat;
-      const geo = this.topology.kind === 'tetra'
-        ? new THREE.CircleGeometry(0.48, 3)
-        : new THREE.PlaneGeometry(0.92, 0.92);
-      const m = new THREE.Mesh(geo, mat);
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(0.92, 0.92), mat);
       const f = this.topology.faces[id];
-      m.position.copy(f.n).multiplyScalar(this.topology.kind === 'tetra' ? 0.58 : 0.5);
-      m.quaternion.setFromUnitVectors(this.topology.kind === 'tetra' ? Z : Z, f.n);
-      if (this.topology.kind === 'tetra') m.rotateOnAxis(f.n, Math.PI / 2);
+      m.position.copy(f.n).multiplyScalar(0.5);
+      m.quaternion.setFromUnitVectors(Z, f.n);
       this.root.add(m);
     }
 
-    const outlineGeo = this.topology.kind === 'tetra'
-      ? new THREE.TetrahedronGeometry(0.9)
-      : new THREE.BoxGeometry(1, 1, 1);
     this.root.add(new THREE.LineSegments(
-      new THREE.EdgesGeometry(outlineGeo),
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)),
       new THREE.LineBasicMaterial({ color: 0x9fb4ff, transparent: true, opacity: 0.5 })
     ));
   }
@@ -78,6 +71,7 @@ export class MiniMap {
       this.ghostDots[i].position.copy(this._tmp);
       this.ghostDots[i].visible = g.mode !== 'eaten';
     });
+    for (let i = ghosts.length; i < this.ghostDots.length; i++) this.ghostDots[i].visible = false;
   }
 
   render(renderer) {

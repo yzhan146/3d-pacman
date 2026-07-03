@@ -25,6 +25,8 @@ export class Player {
     this.teleportLockKey = null;
     this.portalGrace = 0;
     this.edgePortalLockKey = null;
+    this.velU = 0;
+    this.velV = 0;
 
     this._buildMesh();
     this.syncTransform();
@@ -104,6 +106,57 @@ export class Player {
     this.group.add(this.mesh);
     this._localPos = new THREE.Vector3();
     this._fwd = new THREE.Vector3();
+
+    // Reward attachments: cosmetics (pure trophies) + a shield bubble.
+    this.cosmetics = new THREE.Group();
+    this.mesh.add(this.cosmetics);
+    this._cosmeticKinds = new Set();
+    this.shieldCharges = 0;
+    this.shieldBubble = new THREE.Mesh(
+      new THREE.SphereGeometry(PLAYER_RADIUS * 1.7, 20, 16),
+      new THREE.MeshStandardMaterial({
+        color: 0x8dff9b, emissive: new THREE.Color(0x2ecb74), emissiveIntensity: 0.4,
+        roughness: 0.2, metalness: 0, transparent: true, opacity: 0.24, side: THREE.DoubleSide
+      })
+    );
+    this.shieldBubble.visible = false;
+    this.mesh.add(this.shieldBubble);
+  }
+
+  setCosmetic(kind) {
+    if (!this.cosmetics || this._cosmeticKinds.has(kind)) return;
+    this._cosmeticKinds.add(kind);
+    const r = PLAYER_RADIUS;
+    let node = null;
+    if (kind === 'hat') {
+      node = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({ color: 0x2a2f45, roughness: 0.5, metalness: 0.3 });
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(r * 0.5, r * 0.7, 16), mat);
+      cone.position.y = r * 1.3;
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.66, r * 0.66, r * 0.08, 16), mat);
+      brim.position.y = r * 0.98;
+      node.add(cone, brim);
+    } else if (kind === 'cape') {
+      const mat = new THREE.MeshStandardMaterial({ color: 0xff5b7b, emissive: new THREE.Color(0x3a0d18), emissiveIntensity: 0.3, roughness: 0.6, side: THREE.DoubleSide });
+      node = new THREE.Mesh(new THREE.BoxGeometry(r * 1.1, r * 1.35, r * 0.1), mat);
+      node.position.set(0, -r * 0.1, r * 0.78);
+      node.rotation.x = 0.22;
+    } else if (kind === 'glasses') {
+      const mat = new THREE.MeshStandardMaterial({ color: 0x0a1420, emissive: new THREE.Color(0x2299cc), emissiveIntensity: 0.4, roughness: 0.3, metalness: 0.4 });
+      node = new THREE.Mesh(new THREE.BoxGeometry(r * 1.0, r * 0.24, r * 0.1), mat);
+      node.position.set(0, r * 0.5, -r * 0.74);
+    } else if (kind === 'crown') {
+      const mat = new THREE.MeshStandardMaterial({ color: 0xffe08a, emissive: new THREE.Color(0x6a4c0a), emissiveIntensity: 0.5, roughness: 0.3, metalness: 0.6 });
+      node = new THREE.Mesh(new THREE.TorusGeometry(r * 0.5, r * 0.1, 8, 20), mat);
+      node.rotation.x = Math.PI / 2;
+      node.position.y = r * 1.15;
+    }
+    if (node) this.cosmetics.add(node);
+  }
+
+  setShield(count) {
+    this.shieldCharges = Math.max(0, count | 0);
+    if (this.shieldBubble) this.shieldBubble.visible = this.shieldCharges > 0;
   }
 
   localForward(out = new THREE.Vector3()) {
@@ -211,28 +264,33 @@ export class Player {
     if (this.edgePortalLockKey && this.edgePortalLockKey !== hereKey) this.edgePortalLockKey = null;
     let isMoving = false;
     if (!world.rotating) {
-      const { f, s } = move;
-      if ((f !== 0 || s !== 0) && cameraForwardWorld && cameraRightWorld) {
-        const desiredWorld = cameraForwardWorld.clone().multiplyScalar(f).addScaledVector(cameraRightWorld, s);
-        const desiredLocal = desiredWorld.applyQuaternion(this.group.quaternion.clone().invert());
-        let du = desiredLocal.dot(this.topology.faces[this.face].r);
-        let dv = desiredLocal.dot(this.topology.faces[this.face].u);
-        const len = Math.hypot(du, dv) || 1;
-        const step = (PLAYER_SPEED * world.getSpeedMultiplier(this.face, this.u, this.v, du, dv) / CELL) * dt;
-        du = du / len * step; dv = dv / len * step;
-        this._desiredHeading = Math.atan2(du, dv);
-        const diff = Math.atan2(Math.sin(this._desiredHeading - this.heading), Math.cos(this._desiredHeading - this.heading));
-        this.heading += diff * Math.min(1, dt * 14);
-        const prevU = this.u;
-        const prevV = this.v;
-        this.u = this._resolveX(this.u + du, this.v);
-        const blockedX = Math.abs(this.u - (prevU + du)) > 1e-4;
-        this.v = this._resolveY(this.v + dv, this.u);
-        const blockedY = Math.abs(this.v - (prevV + dv)) > 1e-4;
-        if (blockedX || blockedY) this._applyCornerAssist(blockedX, blockedY, du, dv);
-        this.mouth = (this.mouth + dt * 8) % (Math.PI * 2);
-        isMoving = true;
-        world.tryTeleportPlayer(this);
+      if (world.hasSurfaces) {
+        isMoving = this._moveWithSurfaces(dt, move, world, cameraForwardWorld, cameraRightWorld);
+        if (isMoving) this.mouth = (this.mouth + dt * 8) % (Math.PI * 2);
+      } else {
+        const { f, s } = move;
+        if ((f !== 0 || s !== 0) && cameraForwardWorld && cameraRightWorld) {
+          const desiredWorld = cameraForwardWorld.clone().multiplyScalar(f).addScaledVector(cameraRightWorld, s);
+          const desiredLocal = desiredWorld.applyQuaternion(this.group.quaternion.clone().invert());
+          let du = desiredLocal.dot(this.topology.faces[this.face].r);
+          let dv = desiredLocal.dot(this.topology.faces[this.face].u);
+          const len = Math.hypot(du, dv) || 1;
+          const step = (PLAYER_SPEED * world.getSpeedMultiplier(this.face, this.u, this.v, du, dv) / CELL) * dt;
+          du = du / len * step; dv = dv / len * step;
+          this._desiredHeading = Math.atan2(du, dv);
+          const diff = Math.atan2(Math.sin(this._desiredHeading - this.heading), Math.cos(this._desiredHeading - this.heading));
+          this.heading += diff * Math.min(1, dt * 14);
+          const prevU = this.u;
+          const prevV = this.v;
+          this.u = this._resolveX(this.u + du, this.v);
+          const blockedX = Math.abs(this.u - (prevU + du)) > 1e-4;
+          this.v = this._resolveY(this.v + dv, this.u);
+          const blockedY = Math.abs(this.v - (prevV + dv)) > 1e-4;
+          if (blockedX || blockedY) this._applyCornerAssist(blockedX, blockedY, du, dv);
+          this.mouth = (this.mouth + dt * 8) % (Math.PI * 2);
+          isMoving = true;
+          world.tryTeleportPlayer(this);
+        }
       }
       this._checkCrossing(world);
     }
@@ -249,6 +307,57 @@ export class Player {
     this.thrusterGlow.material.emissiveIntensity = isMoving ? 2.0 : 0.7;
 
     this.syncTransform();
+  }
+
+  _moveWithSurfaces(dt, move, world, camF, camR) {
+    const face = this.topology.faces[this.face];
+    let desU = 0, desV = 0;
+    const { f, s } = move;
+    if ((f !== 0 || s !== 0) && camF && camR) {
+      const desiredWorld = camF.clone().multiplyScalar(f).addScaledVector(camR, s);
+      const desiredLocal = desiredWorld.applyQuaternion(this.group.quaternion.clone().invert());
+      let du = desiredLocal.dot(face.r);
+      let dv = desiredLocal.dot(face.u);
+      const len = Math.hypot(du, dv) || 1;
+      const speed = PLAYER_SPEED * world.getSpeedMultiplier(this.face, this.u, this.v, du, dv) / CELL;
+      desU = du / len * speed;
+      desV = dv / len * speed;
+    }
+
+    const surf = world.getSurface(this.face, this.u, this.v);
+    if (surf.ice) {
+      // Slidey: velocity eases toward input, keeping momentum when you let go.
+      const k = Math.min(1, 2.4 * dt);
+      this.velU += (desU - this.velU) * k;
+      this.velV += (desV - this.velV) * k;
+    } else {
+      this.velU = desU;
+      this.velV = desV;
+    }
+
+    let stepU = this.velU * dt;
+    let stepV = this.velV * dt;
+    if (surf.conveyor) {
+      const cs = PLAYER_SPEED * 0.55 / CELL;
+      stepU += surf.conveyor[0] * cs * dt;
+      stepV += surf.conveyor[1] * cs * dt;
+    }
+
+    const prevU = this.u, prevV = this.v;
+    this.u = this._resolveX(this.u + stepU, this.v);
+    if (Math.abs(this.u - (prevU + stepU)) > 1e-4) this.velU = 0;
+    this.v = this._resolveY(this.v + stepV, this.u);
+    if (Math.abs(this.v - (prevV + stepV)) > 1e-4) this.velV = 0;
+
+    const movedU = this.u - prevU, movedV = this.v - prevV;
+    const moving = Math.abs(movedU) > 1e-4 || Math.abs(movedV) > 1e-4;
+    if (moving) {
+      this._desiredHeading = Math.atan2(movedU, movedV);
+      const diff = Math.atan2(Math.sin(this._desiredHeading - this.heading), Math.cos(this._desiredHeading - this.heading));
+      this.heading += diff * Math.min(1, dt * 14);
+      world.tryTeleportPlayer(this);
+    }
+    return moving;
   }
 
   _checkCrossing(world) {
@@ -285,6 +394,8 @@ export class Player {
     this.teleportLockKey = null;
     this.portalGrace = 0;
     this.edgePortalLockKey = null;
+    this.velU = 0;
+    this.velV = 0;
     this.syncTransform();
   }
 }
