@@ -269,7 +269,7 @@ export class World {
     reg.eaten = true;
     this.remaining--;
     this.faceRemaining[reg.face]--;
-    if (this.faceRemaining[reg.face] === 0) this._markFaceCleared(reg.face);
+    this._refreshFaceClearState(reg.face);
     const inst = reg.list === 'dot' ? this.dotInst : this.powInst;
     this._dummy.scale.set(0, 0, 0);
     this._dummy.position.set(0, 0, 0);
@@ -278,6 +278,21 @@ export class World {
     inst.setMatrixAt(reg.idx, this._dummy.matrix);
     inst.instanceMatrix.needsUpdate = true;
     return reg.kind;
+  }
+
+  _refreshFaceClearState(faceId) {
+    const reg = this.registry?.[faceId];
+    if (!reg) return;
+    let remaining = 0;
+    for (let y = 0; y < GRID; y++) {
+      for (let x = 0; x < GRID; x++) {
+        const cell = reg[y][x];
+        if (cell && !cell.eaten) remaining++;
+      }
+    }
+    this.faceRemaining[faceId] = remaining;
+    if (remaining === 0) this._markFaceCleared(faceId);
+    else this._markFaceUncleared(faceId);
   }
 
   _markFaceCleared(faceId) {
@@ -290,6 +305,16 @@ export class World {
     mat.opacity = 1;
     mat.transparent = false;
     mat.depthWrite = true;
+    mat.needsUpdate = true;
+  }
+
+  _markFaceUncleared(faceId) {
+    const inst = this.wallMeshes?.[faceId];
+    if (!inst) return;
+    const mat = inst.material;
+    mat.opacity = 0.42;
+    mat.transparent = true;
+    mat.depthWrite = false;
     mat.needsUpdate = true;
   }
 
