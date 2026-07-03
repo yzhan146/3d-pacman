@@ -177,7 +177,8 @@ export class Ghost {
   }
 
   _cross(edge, world = null) {
-    const a = world ? world.tryUseFacePortal('ghost', this.face, edge) : crossEdge(this.face, edge);
+    const kind = this.mode === 'eaten' ? 'ghost-eye' : 'ghost';
+    const a = world ? world.tryUseFacePortal(kind, this.face, edge) : crossEdge(this.face, edge);
     if (!a) return this._random();
     this.face = a.face;
     this.cx = a.cell[0]; this.cy = a.cell[1];

@@ -660,6 +660,7 @@ export class World {
   }
 
   tryUseFacePortal(kind, faceId, edge) {
+    if (kind === 'ghost-eye') return crossEdge(faceId, edge);
     const pairKey = this._edgePortalKey(faceId, edge);
     const state = this.edgePortalState.get(pairKey);
     if (state && state.cooldown > 0) return null;
