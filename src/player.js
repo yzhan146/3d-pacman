@@ -23,6 +23,7 @@ export class Player {
     this._desiredHeading = 0;
     this.teleportCooldown = 0;
     this.teleportLockKey = null;
+    this.portalGrace = 0;
 
     this._buildMesh();
     this.syncTransform();
@@ -204,6 +205,7 @@ export class Player {
 
   update(dt, move, world, cameraForwardWorld, cameraRightWorld) {
     this.teleportCooldown = Math.max(0, this.teleportCooldown - dt);
+    this.portalGrace = Math.max(0, this.portalGrace - dt);
     let isMoving = false;
     if (!world.rotating) {
       const { f, s } = move;
@@ -254,12 +256,20 @@ export class Player {
     else if (this.v < -0.5 && Math.abs(this.u - MID) < 0.7) edge = 'B';
     if (!edge) return;
 
-    const a = crossEdge(this.face, edge);
+    const a = world.tryUseFacePortal('player', this.face, edge);
+    if (!a) {
+      if (edge === 'R') this.u = GRID - 1 + 0.49;
+      else if (edge === 'L') this.u = -0.49;
+      else if (edge === 'T') this.v = GRID - 1 + 0.49;
+      else if (edge === 'B') this.v = -0.49;
+      return;
+    }
     this.face = a.face;
     this.u = a.cell[0] + a.heading[0] * 0.5;
     this.v = a.cell[1] + a.heading[1] * 0.5;
     this.heading = Math.atan2(a.heading[0], a.heading[1]);
     this.teleportCooldown = 0.5;
+    this.portalGrace = 0.55;
     world.startRotation(this.face);
     if (this.onCross) this.onCross();
   }
@@ -268,6 +278,7 @@ export class Player {
     this.face = face; this.u = u; this.v = v; this.heading = 0; this.alive = true;
     this.teleportCooldown = 0;
     this.teleportLockKey = null;
+    this.portalGrace = 0;
     this.syncTransform();
   }
 }

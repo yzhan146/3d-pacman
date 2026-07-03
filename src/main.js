@@ -231,7 +231,7 @@ class Game {
     for (const g of this.ghosts) {
       g.getWorldPosition(gp);
       if (pp.distanceTo(gp) < 2.0) {
-        if ((this.reviveGrace && g.isDangerous()) || g.mode === 'recover') continue;
+        if ((this.reviveGrace && g.isDangerous()) || this.player.portalGrace > 0 || g.mode === 'recover') continue;
         if (g.isEdible()) {
           g.getEaten();
           this.ghostChain++;
