@@ -31,12 +31,14 @@ export class FollowCamera {
     player.worldForward(_fwd);
     outPos.copy(_playerPos)
       .addScaledVector(_fwd, -DIST)
-      .addScaledVector(_up, HEIGHT + this.pitch * 6);
-    outLook.copy(_playerPos).addScaledVector(_fwd, LOOK_AHEAD).addScaledVector(_up, 1.5);
+      .addScaledVector(_up, HEIGHT + this.pitch * 4.2);
+    outLook.copy(_playerPos)
+      .addScaledVector(_fwd, LOOK_AHEAD + Math.max(0, this.pitch) * 2.2)
+      .addScaledVector(_up, 1.5 + this.pitch * 3.2);
   }
 
   update(player, dt, mouseDY = 0) {
-    this.pitch = THREE.MathUtils.clamp(this.pitch + mouseDY * 0.0015, -0.6, 0.8);
+    this.pitch = THREE.MathUtils.clamp(this.pitch + mouseDY * 0.0022, -0.25, 0.95);
     if (!this.initialized) { this.snap(player); return; }
     this._compute(player, _desired, _look);
     const k = 1 - Math.pow(0.0016, dt); // frame-rate independent smoothing

@@ -15,6 +15,7 @@ export class Player {
     this.face = startFace;
     this.u = MID; this.v = MID;
     this.heading = 0;
+    this.facing = 0;
     this.mouth = 0;
     this._curFrame = -1;
     this.alive = true;
@@ -100,7 +101,7 @@ export class Player {
 
   localForward(out = new THREE.Vector3()) {
     const f = FACES[this.face];
-    const s = Math.sin(this.heading), c = Math.cos(this.heading);
+    const s = Math.sin(this.facing), c = Math.cos(this.facing);
     out.set(0, 0, 0).addScaledVector(f.r, s).addScaledVector(f.u, c);
     return out.normalize();
   }
@@ -175,6 +176,8 @@ export class Player {
         const len = Math.hypot(du, dv) || 1;
         const step = (PLAYER_SPEED / CELL) * dt;
         du = du / len * step; dv = dv / len * step;
+        const targetFacing = Math.atan2(du, dv);
+        this.facing = THREE.MathUtils.lerp(this.facing, targetFacing, Math.min(1, dt * 14));
         this.u = this._resolveX(this.u + du, this.v);
         this.v = this._resolveY(this.v + dv, this.u);
         this.mouth = (this.mouth + dt * 8) % (Math.PI * 2);
@@ -210,12 +213,13 @@ export class Player {
     this.u = a.cell[0] + a.heading[0] * 0.5;
     this.v = a.cell[1] + a.heading[1] * 0.5;
     this.heading = Math.atan2(a.heading[0], a.heading[1]);
+    this.facing = this.heading;
     world.startRotation(this.face);
     if (this.onCross) this.onCross();
   }
 
   respawn(face, u, v) {
-    this.face = face; this.u = u; this.v = v; this.heading = 0; this.alive = true;
+    this.face = face; this.u = u; this.v = v; this.heading = 0; this.facing = 0; this.alive = true;
     this.syncTransform();
   }
 }

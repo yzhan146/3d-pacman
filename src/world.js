@@ -2,7 +2,7 @@
 // markers, and the smooth face-to-face rotation of the whole cube group.
 import * as THREE from 'three';
 import {
-  CELL, HALF, WALL_HEIGHT, COLORS, CUBE_ROT_TIME, GRID
+  CELL, HALF, WALL_HEIGHT, COLORS, CUBE_ROT_TIME, GRID, FACE_STYLES
 } from './config.js';
 import { FACE_IDS, FACES, faceGridToLocal, CANON_QUAT, EDGES, edgeInfo } from './cube.js';
 import { PATH, DOT, POWER } from './maze.js';
@@ -29,6 +29,74 @@ function makeGridTexture() {
   return tex;
 }
 
+function makeIconTexture(style) {
+  const s = 192;
+  const c = document.createElement('canvas');
+  c.width = c.height = s;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, s, s);
+  ctx.strokeStyle = style.iconColor;
+  ctx.fillStyle = style.iconColor;
+  ctx.lineWidth = 10;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const mid = s / 2;
+  switch (style.icon) {
+    case 'sun':
+      ctx.beginPath(); ctx.arc(mid, mid, 30, 0, Math.PI * 2); ctx.stroke();
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(mid + Math.cos(a) * 45, mid + Math.sin(a) * 45);
+        ctx.lineTo(mid + Math.cos(a) * 72, mid + Math.sin(a) * 72);
+        ctx.stroke();
+      }
+      break;
+    case 'leaf':
+      ctx.beginPath();
+      ctx.moveTo(mid - 38, mid + 10);
+      ctx.quadraticCurveTo(mid, mid - 55, mid + 42, mid);
+      ctx.quadraticCurveTo(mid, mid + 52, mid - 38, mid + 10);
+      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(mid - 18, mid + 18); ctx.lineTo(mid + 20, mid - 18); ctx.stroke();
+      break;
+    case 'flower':
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2 - Math.PI / 2;
+        ctx.beginPath();
+        ctx.arc(mid + Math.cos(a) * 26, mid + Math.sin(a) * 26, 18, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.beginPath(); ctx.arc(mid, mid, 14, 0, Math.PI * 2); ctx.fill();
+      break;
+    case 'moon':
+      ctx.beginPath(); ctx.arc(mid - 6, mid, 34, -1.1, 1.1); ctx.stroke();
+      ctx.beginPath(); ctx.arc(mid + 8, mid, 28, 1.25, -1.25, true); ctx.stroke();
+      break;
+    case 'star':
+      ctx.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const a = -Math.PI / 2 + i * Math.PI / 5;
+        const r = i % 2 === 0 ? 42 : 18;
+        const x = mid + Math.cos(a) * r;
+        const y = mid + Math.sin(a) * r;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.closePath(); ctx.stroke();
+      break;
+    case 'bird':
+      ctx.beginPath();
+      ctx.moveTo(mid - 52, mid + 6);
+      ctx.quadraticCurveTo(mid - 22, mid - 30, mid, mid - 4);
+      ctx.quadraticCurveTo(mid + 22, mid - 30, mid + 52, mid + 6);
+      ctx.stroke();
+      break;
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 export class World {
   constructor(scene, worldData) {
     this.scene = scene;
@@ -47,6 +115,7 @@ export class World {
 
     this._buildFloors();
     this._buildWalls();
+    this._buildEmblems();
     this._buildPellets();
     this._buildPortals();
   }
@@ -60,11 +129,12 @@ export class World {
     const tex = makeGridTexture();
     const geo = new THREE.BoxGeometry(GRID * CELL, 0.6, GRID * CELL);
     this.floorMats = [];
-    for (const id of FACE_IDS) {
+    FACE_IDS.forEach((id, index) => {
+      const style = FACE_STYLES[index % FACE_STYLES.length];
       const mat = new THREE.MeshStandardMaterial({
-        map: tex, color: 0x9fb0e0, roughness: 0.92, metalness: 0.0,
+        map: tex, color: style.floorTint, roughness: 0.92, metalness: 0.0,
         envMapIntensity: 0.25,
-        emissive: new THREE.Color(COLORS.floor), emissiveIntensity: 0.18
+        emissive: new THREE.Color(style.floorTint).multiplyScalar(0.28), emissiveIntensity: 0.16
       });
       this.floorMats.push(mat);
       const m = new THREE.Mesh(geo, mat);
@@ -73,7 +143,7 @@ export class World {
       m.quaternion.setFromUnitVectors(UP, f.n);
       m.receiveShadow = true;
       this.group.add(m);
-    }
+    });
   }
 
   _countCells(pred) {
@@ -90,7 +160,8 @@ export class World {
     const geo = new THREE.BoxGeometry(CELL, WALL_HEIGHT, CELL);
     this.wallMat = new THREE.MeshStandardMaterial({
       color: COLORS.wall, roughness: 0.72, metalness: 0.05, envMapIntensity: 0.35,
-      emissive: new THREE.Color(COLORS.wallEmissive), emissiveIntensity: 0.22
+      emissive: new THREE.Color(COLORS.wallEmissive), emissiveIntensity: 0.14,
+      vertexColors: true
     });
     const inst = new THREE.InstancedMesh(geo, this.wallMat, count);
     inst.castShadow = true; inst.receiveShadow = true;
@@ -99,6 +170,8 @@ export class World {
     const pos = new THREE.Vector3();
     let i = 0;
     for (const id of FACE_IDS) {
+      const style = FACE_STYLES[FACE_IDS.indexOf(id) % FACE_STYLES.length];
+      const tint = new THREE.Color(style.wallTint);
       const g = this.data.faces[id].grid;
       const f = FACES[id];
       q.setFromUnitVectors(UP, f.n);
@@ -111,11 +184,35 @@ export class World {
         dummy.scale.set(1, 1, 1);
         dummy.updateMatrix();
         inst.setMatrixAt(i++, dummy.matrix);
+        inst.setColorAt(i - 1, tint);
       }
     }
     inst.instanceMatrix.needsUpdate = true;
+    if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
     this.walls = inst;
     this.group.add(inst);
+  }
+
+  _buildEmblems() {
+    this.emblems = new THREE.Group();
+    const geo = new THREE.PlaneGeometry(CELL * 2.2, CELL * 2.2);
+    FACE_IDS.forEach((id, index) => {
+      const style = FACE_STYLES[index % FACE_STYLES.length];
+      const f = FACES[id];
+      const tex = makeIconTexture(style);
+      const mat = new THREE.MeshBasicMaterial({
+        map: tex,
+        transparent: true,
+        opacity: 0.78,
+        depthWrite: false
+      });
+      const sign = new THREE.Mesh(geo, mat);
+      const base = faceGridToLocal(id, (GRID - 1) / 2, (GRID - 1) / 2, new THREE.Vector3());
+      sign.position.copy(base).addScaledVector(f.n, 2.7);
+      sign.quaternion.setFromUnitVectors(ZAX, f.n);
+      this.emblems.add(sign);
+    });
+    this.group.add(this.emblems);
   }
 
   _buildPellets() {
@@ -243,9 +340,8 @@ export class World {
   }
 
   setTheme(theme) {
-    this.wallMat.color.setHex(theme.wall);
     this.wallMat.emissive.setHex(theme.wallEmissive);
-    for (const m of this.floorMats) m.emissive.setHex(theme.floor);
+    for (const m of this.floorMats) m.envMapIntensity = 0.22;
   }
 
   update(dt) {

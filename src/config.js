@@ -1,6 +1,6 @@
 // Central tuning constants for 3D Pac-Cube.
 
-export const GRID = 15;                 // cells per face (odd -> true middle cell for portals)
+export const GRID = 11;                 // cells per face (odd -> true middle cell for portals)
 export const MID = (GRID - 1) / 2;      // middle index = 7
 export const CELL = 4;                  // world units per cell
 export const FACE_SIZE = GRID * CELL;   // side length of a cube face
@@ -39,6 +39,15 @@ export const FRIGHT_FLASH = 0xffffff;
 
 export const CUBE_ROT_TIME = 0.55;      // seconds for a face-to-face world rotation
 
+export const FACE_STYLES = [
+  { name: 'Sun',    wallTint: 0xffc24d, floorTint: 0x1b1320, icon: 'sun',    iconColor: '#ffd26a' },
+  { name: 'Leaf',   wallTint: 0x58d68d, floorTint: 0x0d1813, icon: 'leaf',   iconColor: '#8ef0b1' },
+  { name: 'Flower', wallTint: 0xff7eb8, floorTint: 0x190d18, icon: 'flower', iconColor: '#ffc6e1' },
+  { name: 'Moon',   wallTint: 0x9eb6ff, floorTint: 0x0d1222, icon: 'moon',   iconColor: '#d7e2ff' },
+  { name: 'Star',   wallTint: 0xff9a5a, floorTint: 0x1a1109, icon: 'star',   iconColor: '#ffd0a8' },
+  { name: 'Bird',   wallTint: 0x63d9ff, floorTint: 0x09171d, icon: 'bird',   iconColor: '#b7f3ff' }
+];
+
 // Per-level visual themes + difficulty ramp (cycles for endless levels).
 export const THEMES = [
   { name: 'Deep Space',   nebula: ['#1a2a6c', '#05060c'], star: '#bcd0ff',
@@ -51,4 +60,3 @@ export const THEMES = [
     fog: '#100603', wall: 0x9c4a1a, wallEmissive: 0xff7a2a, floor: 0x180a04, ghostSpeedMul: 1.38 }
 ];
 export function themeForLevel(level) { return THEMES[(level - 1) % THEMES.length]; }
-
