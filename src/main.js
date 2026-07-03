@@ -107,6 +107,7 @@ class Game {
 
   buildLevel() {
     if (this.world) { this.scene.remove(this.world.group); }
+    this.reviveGrace = false;
     const theme = themeForLevel(this.level);
     this.background.setTheme(theme);
     Ghost.speedMul = theme.ghostSpeedMul;
@@ -131,6 +132,7 @@ class Game {
   startGame() {
     this.audio.start();
     this.level = 1; this.score = 0; this.lives = LIVES_START;
+    this.reviveGrace = false;
     this.hud.setScore(0); this.hud.setLevel(1); this.hud.setLives(this.lives);
     this.hud.hideOverlay();
     this.buildLevel();

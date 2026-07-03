@@ -44,6 +44,7 @@ export class Player {
       const mouth = 0.05 + t * 0.85;            // radians of the wedge opening
       const g = new THREE.SphereGeometry(r, 32, 20, mouth / 2, Math.PI * 2 - mouth);
       g.rotateY(-Math.PI / 2);                  // move opening to face -Z
+      g.rotateZ(Math.PI / 2);                   // convert left-right wedge to upper-lower jaws
       this._mouthGeos.push(g);
     }
     this.pac = new THREE.Mesh(this._mouthGeos[1], bodyMat);
