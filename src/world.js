@@ -132,6 +132,7 @@ export class World {
       ];
       const map = new Map();
       const pads = [];
+      const pairs = [];
       for (const [a, b] of rawPairs) {
         const pa = this._nearestPathCell(faceId, a[0], a[1], used);
         if (pa) used.add(this._cellKey(pa[0], pa[1]));
@@ -141,6 +142,7 @@ export class World {
         map.set(this._cellKey(pa[0], pa[1]), pb);
         map.set(this._cellKey(pb[0], pb[1]), pa);
         pads.push(pa, pb);
+        pairs.push([pa, pb]);
         // remove pellets on teleporter cells
         const pellets = this.data.faces[faceId].pellets;
         for (const [x, y] of [pa, pb]) {
@@ -153,6 +155,7 @@ export class World {
       }
       this.effects[faceId].map = map;
       this.effects[faceId].pads = pads;
+      this.effects[faceId].pairs = pairs;
     }
   }
 
@@ -262,19 +265,46 @@ export class World {
     }
 
     // Teleporter visuals
-    const padMat = new THREE.MeshStandardMaterial({
-      color: 0x8a6dff, emissive: 0x5a35ff, emissiveIntensity: 0.45,
-      roughness: 0.35, metalness: 0.05, transparent: true, opacity: 0.92
-    });
-    const ringGeo = new THREE.TorusGeometry(CELL * 0.28, 0.13, 12, 22);
-    for (const pad of this.effects.PZ?.pads || []) {
-      const [x, y] = pad;
-      const f = FACES.PZ;
-      const base = faceGridToLocal('PZ', x, y, new THREE.Vector3());
-      const ring = new THREE.Mesh(ringGeo, padMat);
-      ring.position.copy(base).addScaledVector(f.n, 0.18);
-      ring.quaternion.setFromUnitVectors(ZAX, f.n);
-      this.effectMeshes.add(ring);
+    const holeGeo = new THREE.CylinderGeometry(CELL * 0.36, CELL * 0.58, 0.22, 28);
+    const rimGeo = new THREE.TorusGeometry(CELL * 0.44, 0.08, 10, 24);
+    const pairColors = [0x7f6bff, 0xff8fb8];
+    let pairIndex = 0;
+    for (const pair of this.effects.PZ?.pairs || []) {
+      const color = pairColors[pairIndex++ % pairColors.length];
+      const holeMat = new THREE.MeshStandardMaterial({
+        color: 0x07070b,
+        emissive: color,
+        emissiveIntensity: 0.32,
+        roughness: 0.92,
+        metalness: 0.0,
+        transparent: true,
+        opacity: 0.98
+      });
+      const rimMat = new THREE.MeshStandardMaterial({
+        color,
+        emissive: color,
+        emissiveIntensity: 0.5,
+        roughness: 0.35,
+        metalness: 0.05,
+        transparent: true,
+        opacity: 0.92
+      });
+      for (const pad of pair) {
+        const [x, y] = pad;
+        const f = FACES.PZ;
+        const base = faceGridToLocal('PZ', x, y, new THREE.Vector3());
+
+        const hole = new THREE.Mesh(holeGeo, holeMat);
+        hole.position.copy(base).addScaledVector(f.n, 0.02);
+        hole.quaternion.setFromUnitVectors(UP, f.n);
+        hole.scale.y = 0.3;
+        this.effectMeshes.add(hole);
+
+        const rim = new THREE.Mesh(rimGeo, rimMat);
+        rim.position.copy(base).addScaledVector(f.n, 0.16);
+        rim.quaternion.setFromUnitVectors(ZAX, f.n);
+        this.effectMeshes.add(rim);
+      }
     }
 
     this.group.add(this.effectMeshes);
@@ -349,26 +379,17 @@ export class World {
     const key = this._cellKey(player.cellX, player.cellY);
     const dest = fx.map.get(key);
     if (!dest) return false;
-    player.u = dest[0] + Math.sin(player.heading) * 0.18;
-    player.v = dest[1] + Math.cos(player.heading) * 0.18;
-    player.teleportCooldown = 0.45;
+    const dx = Math.sin(player.heading);
+    const dy = Math.cos(player.heading);
+    // Drop out one full cell beyond the destination pad, away from immediate re-trigger.
+    player.u = dest[0] + dx * 1.05;
+    player.v = dest[1] + dy * 1.05;
+    player.teleportCooldown = 0.8;
     return true;
   }
 
   tryTeleportGhost(ghost) {
-    if (ghost.teleportCooldown > 0) return false;
-    const fx = this.effects[ghost.face];
-    if (!fx || fx.type !== 'teleport') return false;
-    const key = this._cellKey(ghost.cx, ghost.cy);
-    const dest = fx.map.get(key);
-    if (!dest) return false;
-    ghost.cx = dest[0];
-    ghost.cy = dest[1];
-    ghost.teleportCooldown = 0.45;
-    const nx = ghost.cx + ghost.dir[0], ny = ghost.cy + ghost.dir[1];
-    if (ghost.isPath(ghost.face, nx, ny)) ghost.next = [nx, ny];
-    else ghost.next = [ghost.cx, ghost.cy];
-    return true;
+    return false;
   }
 
   _buildPortals() {

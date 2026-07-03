@@ -258,6 +258,7 @@ export class Player {
     this.u = a.cell[0] + a.heading[0] * 0.5;
     this.v = a.cell[1] + a.heading[1] * 0.5;
     this.heading = Math.atan2(a.heading[0], a.heading[1]);
+    this.teleportCooldown = 0.5;
     world.startRotation(this.face);
     if (this.onCross) this.onCross();
   }
