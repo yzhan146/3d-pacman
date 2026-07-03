@@ -6,7 +6,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import {
   LIVES_START, SCORE, FRIGHT_TIME, GHOST_NAMES, HALF, MID, themeForLevel
 } from './config.js';
-import { FACE_IDS } from './cube.js';
+import { FACE_IDS, FACE_ADJ } from './cube.js';
 import { generateWorld, isPath } from './maze.js';
 import { World } from './world.js';
 import { Player } from './player.js';
@@ -35,6 +35,7 @@ class Game {
     this.lives = LIVES_START;
     this.frightTimer = 0;
     this.ghostChain = 0;
+    this.reviveGrace = false;
 
     this.hud.setScore(0);
     this.hud.setLives(this.lives);
@@ -142,11 +143,43 @@ class Game {
     this.hud.message('READY!', '#ffd21a');
   }
 
+  _faceDistance(from, to) {
+    if (from === to) return 0;
+    const seen = new Set([from]);
+    const q = [[from, 0]];
+    while (q.length) {
+      const [cur, d] = q.shift();
+      for (const e of Object.keys(FACE_ADJ[cur])) {
+        const nb = FACE_ADJ[cur][e];
+        if (seen.has(nb)) continue;
+        if (nb === to) return d + 1;
+        seen.add(nb);
+        q.push([nb, d + 1]);
+      }
+    }
+    return 99;
+  }
+
+  _chooseRespawnFace() {
+    const candidates = FACE_IDS.filter(id => (this.world.faceRemaining[id] || 0) > 0);
+    if (!candidates.length) return START_FACE;
+    let best = candidates[0];
+    let bestScore = -Infinity;
+    for (const face of candidates) {
+      const minGhostDist = Math.min(...this.ghosts.map(g => this._faceDistance(face, g.face)));
+      const score = minGhostDist * 100 + this.world.faceRemaining[face];
+      if (score > bestScore) { bestScore = score; best = face; }
+    }
+    return best;
+  }
+
   resetPositions() {
-    this.player.respawn(START_FACE, MID, MID);
-    this.world.setActiveFaceImmediate(START_FACE);
+    const safeFace = this._chooseRespawnFace();
+    this.player.respawn(safeFace, MID, MID);
+    this.world.setActiveFaceImmediate(safeFace);
     this.ghosts.forEach(g => g.respawn());
     this.frightTimer = 0;
+    this.reviveGrace = true;
     this.followCam.snap(this.player);
   }
 
@@ -175,6 +208,10 @@ class Game {
   _eatPellets() {
     const kind = this.world.eatPelletAt(this.player.face, this.player.cellX, this.player.cellY);
     if (!kind) return;
+    if (this.reviveGrace) {
+      this.reviveGrace = false;
+      this.hud.hideMessage();
+    }
     if (kind === 1) { this.score += SCORE.pellet; this.audio.chomp(); }
     else { // POWER
       this.score += SCORE.power; this.audio.power();
@@ -192,6 +229,7 @@ class Game {
     for (const g of this.ghosts) {
       g.getWorldPosition(gp);
       if (pp.distanceTo(gp) < 2.0) {
+        if (this.reviveGrace && g.isDangerous()) continue;
         if (g.isEdible()) {
           g.getEaten();
           this.ghostChain++;
@@ -220,7 +258,7 @@ class Game {
       if (this.state !== 'playing') { /* level cleared during eat */ }
       else {
         const flash = this.frightTimer > 0 && this.frightTimer < 2.2;
-        for (const g of this.ghosts) g.update(dt, this.player, flash);
+        for (const g of this.ghosts) g.update(dt, this.player, flash, this.reviveGrace);
         this._handleCollisions();
         if (this.frightTimer > 0) {
           this.frightTimer -= dt;
@@ -230,7 +268,11 @@ class Game {
     } else if (this.state === 'ready') {
       this.player.update(dt, { f: 0, s: 0 }, this.world, this.followCam.getFlatForward(new THREE.Vector3()), this.followCam.getFlatRight(new THREE.Vector3()));
       this.timer -= dt;
-      if (this.timer <= 0) { this.state = 'playing'; this.hud.hideMessage(); }
+      if (this.timer <= 0) {
+        this.state = 'playing';
+        if (this.reviveGrace) this.hud.message('SAFE UNTIL NEXT DOT', '#8dff9b');
+        else this.hud.hideMessage();
+      }
     } else if (this.state === 'dying') {
       // shrink pac for feedback
       const s = Math.max(0.05, this.timer / 1.4);

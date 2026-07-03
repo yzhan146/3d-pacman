@@ -119,7 +119,7 @@ export class Ghost {
     return { cross: null, cell: [clamp(tx), clamp(ty)] };
   }
 
-  _decide(player) {
+  _decide(player, safeMode = false) {
     // Eaten: go home (route across faces).
     if (this.mode === 'eaten') {
       if (this.face === this.home.face && this.cx === this.home.x && this.cy === this.home.y) {
@@ -133,6 +133,7 @@ export class Ghost {
       }
     }
 
+    if (safeMode) return this._random();
     if (this.mode === 'frightened') return this._random();
 
     const tgt = this._target(player);
@@ -180,13 +181,13 @@ export class Ghost {
     else this.next = [this.cx, this.cy];
   }
 
-  update(dt, player, frightFlash) {
+  update(dt, player, frightFlash, safeMode = false) {
     const cps = this.speed / CELL;
     this.t += cps * dt;
     while (this.t >= 1) {
       this.t -= 1;
       this.cx = this.next[0]; this.cy = this.next[1];
-      this._decide(player);
+      this._decide(player, safeMode);
     }
     this.syncTransform(this.t);
 
