@@ -2,7 +2,7 @@
 // portal markers, and the smooth face-to-face rotation of the whole cube group.
 import * as THREE from 'three';
 import {
-  CELL, HALF, WALL_HEIGHT, COLORS, CUBE_ROT_TIME, GRID, FACE_STYLES
+  CELL, HALF, WALL_HEIGHT, COLORS, CUBE_ROT_TIME, GRID, MID, FACE_STYLES
 } from './config.js';
 import { FACE_IDS, FACES, faceGridToLocal, CANON_QUAT, EDGES, edgeInfo, crossEdge } from './cube.js';
 import { PATH, DOT, POWER } from './maze.js';
