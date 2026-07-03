@@ -52,7 +52,6 @@ export class Input {
     this.joyBaseX = 0; this.joyBaseY = 0;
     this.joyRadius = 62;
     this.lookId = null; this.lookLastX = 0; this.lookLastY = 0;
-    this.touchLookSensitivity = 1.8;
 
     // joystick DOM
     this.joyBase = document.createElement('div');
@@ -100,8 +99,8 @@ export class Input {
           this.joyDX = dx / max; this.joyDY = dy / max;
           this._showJoy(this.joyBaseX, this.joyBaseY, this.joyBaseX + dx, this.joyBaseY + dy);
         } else if (t.identifier === this.lookId) {
-          this.mouseDX += (t.clientX - this.lookLastX) * this.touchLookSensitivity;
-          this.mouseDY += (t.clientY - this.lookLastY) * this.touchLookSensitivity;
+          this.mouseDX += (t.clientX - this.lookLastX);
+          this.mouseDY += (t.clientY - this.lookLastY);
           this.lookLastX = t.clientX; this.lookLastY = t.clientY;
         }
       }
