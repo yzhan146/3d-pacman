@@ -31,6 +31,7 @@ export class Ghost {
     this.t = 0;
     this.mode = 'chase';           // chase | frightened | eaten
     this.frightTimeLeft = 0;
+    this.teleportCooldown = 0;
     this._buildMesh();
     this._pickInitialDir();
     this.syncTransform(0);
@@ -90,9 +91,10 @@ export class Ghost {
 
   get speed() {
     const mul = Ghost.speedMul || 1;
+    const terrainMul = this.terrainMul || 1;
     if (this.mode === 'eaten') return GHOST_SPEED * 1.9 * mul;
     if (this.mode === 'frightened') return GHOST_FRIGHT_SPEED;
-    return GHOST_SPEED * mul;
+    return GHOST_SPEED * mul * terrainMul;
   }
 
   enterFrightened(time) { if (this.mode !== 'eaten') { this.mode = 'frightened'; this.frightTimeLeft = time; } }
@@ -181,12 +183,15 @@ export class Ghost {
     else this.next = [this.cx, this.cy];
   }
 
-  update(dt, player, frightFlash, safeMode = false) {
+  update(dt, player, frightFlash, safeMode = false, world = null) {
+    this.teleportCooldown = Math.max(0, this.teleportCooldown - dt);
+    if (world) this.terrainMul = world.getSpeedMultiplier(this.face, this.cx + (this.next[0] - this.cx) * this.t, this.cy + (this.next[1] - this.cy) * this.t);
     const cps = this.speed / CELL;
     this.t += cps * dt;
     while (this.t >= 1) {
       this.t -= 1;
       this.cx = this.next[0]; this.cy = this.next[1];
+      if (world) world.tryTeleportGhost(this);
       this._decide(player, safeMode);
     }
     this.syncTransform(this.t);

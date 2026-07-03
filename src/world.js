@@ -9,6 +9,11 @@ import { PATH, DOT, POWER } from './maze.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const ZAX = new THREE.Vector3(0, 0, 1);
+const FACE_EFFECT_PLAN = {
+  PY: 'classic',
+  PX: 'mud',
+  PZ: 'teleport'
+};
 
 function makeGridTexture(baseColor) {
   const s = 256;
@@ -62,6 +67,9 @@ export class World {
     this.group = new THREE.Group();
     scene.add(this.group);
 
+    this.effects = {};
+    this._initFaceEffects();
+
     this.remaining = worldData.totalDots;
     this.faceRemaining = {};
     this.rotating = false;
@@ -73,8 +81,79 @@ export class World {
 
     this._buildFloors();
     this._buildWalls();
+    this._buildFaceEffects();
     this._buildPellets();
     this._buildPortals();
+  }
+
+  _cellKey(x, y) { return `${x}:${y}`; }
+
+  _nearestPathCell(faceId, ax, ay, used = null) {
+    const grid = this.data.faces[faceId].grid;
+    let best = null, bestD = Infinity;
+    for (let y = 0; y < GRID; y++) for (let x = 0; x < GRID; x++) {
+      if (grid[y][x] !== PATH) continue;
+      const key = this._cellKey(x, y);
+      if (used && used.has(key)) continue;
+      const d = (x - ax) ** 2 + (y - ay) ** 2;
+      if (d < bestD) { bestD = d; best = [x, y]; }
+    }
+    return best;
+  }
+
+  _initFaceEffects() {
+    for (const id of FACE_IDS) this.effects[id] = { type: FACE_EFFECT_PLAN[id] || 'classic' };
+
+    // Mud pits on PX
+    {
+      const faceId = 'PX';
+      const anchors = [[2, 2], [GRID - 3, 3], [Math.floor(GRID / 2), GRID - 3]];
+      const cells = new Set();
+      const grid = this.data.faces[faceId].grid;
+      for (const [ax, ay] of anchors) {
+        const seed = this._nearestPathCell(faceId, ax, ay);
+        if (!seed) continue;
+        const [sx, sy] = seed;
+        [[0,0],[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx,dy]) => {
+          const x = sx + dx, y = sy + dy;
+          if (x >= 0 && x < GRID && y >= 0 && y < GRID && grid[y][x] === PATH) cells.add(this._cellKey(x, y));
+        });
+      }
+      this.effects[faceId].cells = cells;
+    }
+
+    // Same-face teleporter pads on PZ (2 pairs)
+    {
+      const faceId = 'PZ';
+      const used = new Set();
+      const rawPairs = [
+        [[2, 2], [GRID - 3, GRID - 3]],
+        [[2, GRID - 3], [GRID - 3, 2]]
+      ];
+      const map = new Map();
+      const pads = [];
+      for (const [a, b] of rawPairs) {
+        const pa = this._nearestPathCell(faceId, a[0], a[1], used);
+        if (pa) used.add(this._cellKey(pa[0], pa[1]));
+        const pb = this._nearestPathCell(faceId, b[0], b[1], used);
+        if (pb) used.add(this._cellKey(pb[0], pb[1]));
+        if (!pa || !pb) continue;
+        map.set(this._cellKey(pa[0], pa[1]), pb);
+        map.set(this._cellKey(pb[0], pb[1]), pa);
+        pads.push(pa, pb);
+        // remove pellets on teleporter cells
+        const pellets = this.data.faces[faceId].pellets;
+        for (const [x, y] of [pa, pb]) {
+          if (pellets[y][x] !== 0) {
+            pellets[y][x] = 0;
+            this.data.faces[faceId].dotCount--;
+            this.data.totalDots--;
+          }
+        }
+      }
+      this.effects[faceId].map = map;
+      this.effects[faceId].pads = pads;
+    }
   }
 
   setActiveFaceImmediate(faceId) {
@@ -163,6 +242,44 @@ export class World {
     this.group.add(this.walls);
   }
 
+  _buildFaceEffects() {
+    this.effectMeshes = new THREE.Group();
+
+    // Mud visuals
+    const mudMat = new THREE.MeshStandardMaterial({
+      color: 0x4f3b2b, emissive: 0x1f1208, emissiveIntensity: 0.14,
+      roughness: 0.98, metalness: 0
+    });
+    const mudGeo = new THREE.CylinderGeometry(CELL * 0.4, CELL * 0.52, 0.12, 18);
+    for (const key of this.effects.PX?.cells || []) {
+      const [x, y] = key.split(':').map(Number);
+      const f = FACES.PX;
+      const base = faceGridToLocal('PX', x, y, new THREE.Vector3());
+      const mesh = new THREE.Mesh(mudGeo, mudMat);
+      mesh.position.copy(base).addScaledVector(f.n, 0.05);
+      mesh.quaternion.setFromUnitVectors(UP, f.n);
+      this.effectMeshes.add(mesh);
+    }
+
+    // Teleporter visuals
+    const padMat = new THREE.MeshStandardMaterial({
+      color: 0x8a6dff, emissive: 0x5a35ff, emissiveIntensity: 0.45,
+      roughness: 0.35, metalness: 0.05, transparent: true, opacity: 0.92
+    });
+    const ringGeo = new THREE.TorusGeometry(CELL * 0.28, 0.13, 12, 22);
+    for (const pad of this.effects.PZ?.pads || []) {
+      const [x, y] = pad;
+      const f = FACES.PZ;
+      const base = faceGridToLocal('PZ', x, y, new THREE.Vector3());
+      const ring = new THREE.Mesh(ringGeo, padMat);
+      ring.position.copy(base).addScaledVector(f.n, 0.18);
+      ring.quaternion.setFromUnitVectors(ZAX, f.n);
+      this.effectMeshes.add(ring);
+    }
+
+    this.group.add(this.effectMeshes);
+  }
+
   _buildPellets() {
     this.registry = {};
     const dots = [];
@@ -216,6 +333,42 @@ export class World {
     this.powInst = powInst;
     this.group.add(powInst);
     this._dummy = dummy;
+  }
+
+  getSpeedMultiplier(faceId, u, v) {
+    const fx = this.effects[faceId];
+    if (!fx || fx.type !== 'mud') return 1;
+    const key = this._cellKey(Math.round(u), Math.round(v));
+    return fx.cells.has(key) ? 0.42 : 1;
+  }
+
+  tryTeleportPlayer(player) {
+    if (player.teleportCooldown > 0) return false;
+    const fx = this.effects[player.face];
+    if (!fx || fx.type !== 'teleport') return false;
+    const key = this._cellKey(player.cellX, player.cellY);
+    const dest = fx.map.get(key);
+    if (!dest) return false;
+    player.u = dest[0] + Math.sin(player.heading) * 0.18;
+    player.v = dest[1] + Math.cos(player.heading) * 0.18;
+    player.teleportCooldown = 0.45;
+    return true;
+  }
+
+  tryTeleportGhost(ghost) {
+    if (ghost.teleportCooldown > 0) return false;
+    const fx = this.effects[ghost.face];
+    if (!fx || fx.type !== 'teleport') return false;
+    const key = this._cellKey(ghost.cx, ghost.cy);
+    const dest = fx.map.get(key);
+    if (!dest) return false;
+    ghost.cx = dest[0];
+    ghost.cy = dest[1];
+    ghost.teleportCooldown = 0.45;
+    const nx = ghost.cx + ghost.dir[0], ny = ghost.cy + ghost.dir[1];
+    if (ghost.isPath(ghost.face, nx, ny)) ghost.next = [nx, ny];
+    else ghost.next = [ghost.cx, ghost.cy];
+    return true;
   }
 
   _buildPortals() {

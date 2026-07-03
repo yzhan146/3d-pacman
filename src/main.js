@@ -260,7 +260,7 @@ class Game {
       if (this.state !== 'playing') { /* level cleared during eat */ }
       else {
         const flash = this.frightTimer > 0 && this.frightTimer < 2.2;
-        for (const g of this.ghosts) g.update(dt, this.player, flash, this.reviveGrace);
+        for (const g of this.ghosts) g.update(dt, this.player, flash, this.reviveGrace, this.world);
         this._handleCollisions();
         if (this.frightTimer > 0) {
           this.frightTimer -= dt;

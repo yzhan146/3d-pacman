@@ -21,6 +21,7 @@ export class Player {
     this._curFrame = -1;
     this.alive = true;
     this._desiredHeading = 0;
+    this.teleportCooldown = 0;
 
     this._buildMesh();
     this.syncTransform();
@@ -201,6 +202,7 @@ export class Player {
   }
 
   update(dt, move, world, cameraForwardWorld, cameraRightWorld) {
+    this.teleportCooldown = Math.max(0, this.teleportCooldown - dt);
     let isMoving = false;
     if (!world.rotating) {
       const { f, s } = move;
@@ -210,7 +212,7 @@ export class Player {
         let du = desiredLocal.dot(FACES[this.face].r);
         let dv = desiredLocal.dot(FACES[this.face].u);
         const len = Math.hypot(du, dv) || 1;
-        const step = (PLAYER_SPEED / CELL) * dt;
+        const step = (PLAYER_SPEED * world.getSpeedMultiplier(this.face, this.u, this.v) / CELL) * dt;
         du = du / len * step; dv = dv / len * step;
         this._desiredHeading = Math.atan2(du, dv);
         const diff = Math.atan2(Math.sin(this._desiredHeading - this.heading), Math.cos(this._desiredHeading - this.heading));
@@ -224,6 +226,7 @@ export class Player {
         if (blockedX || blockedY) this._applyCornerAssist(blockedX, blockedY, du, dv);
         this.mouth = (this.mouth + dt * 8) % (Math.PI * 2);
         isMoving = true;
+        world.tryTeleportPlayer(this);
       }
       this._checkCrossing(world);
     }
