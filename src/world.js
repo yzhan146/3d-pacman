@@ -135,7 +135,10 @@ export class World {
         metalness: 0.02,
         envMapIntensity: 0.08,
         emissive: tint.clone().multiplyScalar(0.12),
-        emissiveIntensity: 0.12
+        emissiveIntensity: 0.1,
+        transparent: true,
+        opacity: 0.42,
+        depthWrite: false
       });
       const inst = new THREE.InstancedMesh(geo, mat, count);
       inst.castShadow = true;
@@ -283,7 +286,11 @@ export class World {
     const mat = inst.material;
     const base = mat.color.clone();
     mat.emissive = base.clone().multiplyScalar(0.28);
-    mat.emissiveIntensity = 0.32;
+    mat.emissiveIntensity = 0.18;
+    mat.opacity = 1;
+    mat.transparent = false;
+    mat.depthWrite = true;
+    mat.needsUpdate = true;
   }
 
   startRotation(faceId) {
