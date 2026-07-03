@@ -255,7 +255,9 @@ export class Player {
     let edge = world.getEdgePortalEdge(this.face, this.cellX, this.cellY);
     const lockKey = `${this.face}:${this.cellX}:${this.cellY}`;
     if (edge && this.edgePortalLockKey === lockKey) edge = null;
+    if (edge && world.isFacePortalCoolingDown(this.face, edge)) edge = null;
     if (!edge) edge = this.topology.detectExit(this.face, this.u, this.v);
+    if (edge && world.isFacePortalCoolingDown(this.face, edge)) return;
     if (!edge) return;
 
     const a = world.tryUseFacePortal('player', this.face, edge);

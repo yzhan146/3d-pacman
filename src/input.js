@@ -76,11 +76,11 @@ export class Input {
     document.body.appendChild(this.joyKnob);
 
     const hint = document.querySelector('.hint');
-    if (hint) hint.textContent = '左半屏拖动摇杆移动 · 右半屏拖动转视角 · 按住回头看按钮观察身后';
+    if (hint) hint.textContent = '左半屏拖动摇杆移动 · 右半屏拖动转视角 · 按住回头按钮快速看身后';
 
     this.lookBehindBtn = document.createElement('div');
     this.lookBehindBtn.id = 'look-behind-btn';
-    this.lookBehindBtn.textContent = '回头看';
+    this.lookBehindBtn.textContent = '回头';
     Object.assign(this.lookBehindBtn.style, {
       position: 'fixed',
       right: '18px',

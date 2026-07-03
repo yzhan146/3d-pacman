@@ -88,6 +88,19 @@
       transition: transform 0.15s ease, box-shadow 0.15s ease;
     }
     #start-btn:hover { transform: translateY(-2px) scale(1.03); box-shadow: 0 16px 40px rgba(255,180,30,0.55); }
+    .secondary-btn {
+      pointer-events: auto; cursor: pointer;
+      font-size: 14px; font-weight: 700; letter-spacing: 1px;
+      color: #dff5ff; background: rgba(70,130,255,0.18);
+      border: 1px solid rgba(135,205,255,0.35); border-radius: 999px; padding: 10px 18px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.22);
+      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+    }
+    .secondary-btn:hover { transform: translateY(-1px); background: rgba(90,150,255,0.24); box-shadow: 0 12px 28px rgba(0,0,0,0.28); }
+    .button-row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+    .hud-actions { margin-top: 10px; display: flex; justify-content: flex-end; }
+    .local-test { display: none; }
+    .local-test.show { display: inline-flex; }
     #loading { font-size: 14px; opacity: 0.6; }
     .hint { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
       font-size: 12px; opacity: 0.45; letter-spacing: 1px; }
@@ -106,6 +119,9 @@
       <div class="panel" style="text-align:right;">
         <div id="level">Level 1</div>
         <div id="lives" style="margin-top:8px;justify-content:flex-end;"></div>
+        <div class="hud-actions">
+          <button id="jump-lv2-btn-hud" class="secondary-btn local-test">测试 Lv2</button>
+        </div>
       </div>
     </div>
     <div></div>
@@ -125,7 +141,10 @@
       <div class="key">跨过每条边中间的入口 → 世界翻转到相邻面</div>
       <div class="key">Esc 释放鼠标</div>
     </div>
-    <button id="start-btn">开始游戏</button>
+    <div class="button-row">
+      <button id="start-btn">开始游戏</button>
+      <button id="jump-lv2-btn-overlay" class="secondary-btn local-test">本地测试：直接进入 Lv2</button>
+    </div>
     <div id="loading"></div>
   </div>
 

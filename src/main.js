@@ -23,6 +23,7 @@ class Game {
   constructor() {
     this.hud = new HUD();
     this.audio = new Audio();
+    this.isLocalTest = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
     this._initThree();
     this._initInput();
     this.state = 'menu';
@@ -37,8 +38,13 @@ class Game {
     this.hud.setScore(0);
     this.hud.setLives(this.lives);
     this.hud.setLevel(this.level);
+    this.hud.setLocalTestMode(this.isLocalTest);
 
     this.hud.startBtn.addEventListener('click', () => this.startGame());
+    if (this.isLocalTest) {
+      this.hud.jumpLv2OverlayBtn?.addEventListener('click', () => this.jumpToLevel(2));
+      this.hud.jumpLv2HudBtn?.addEventListener('click', () => this.jumpToLevel(2));
+    }
     window.addEventListener('resize', () => this._onResize());
 
     this.clock = new THREE.Clock();
@@ -132,6 +138,22 @@ class Game {
     this.level = 1; this.score = 0; this.lives = LIVES_START;
     this.reviveGrace = false;
     this.hud.setScore(0); this.hud.setLevel(1); this.hud.setLives(this.lives);
+    this.hud.hideOverlay();
+    this.buildLevel();
+    this._enterReady();
+  }
+
+  jumpToLevel(level) {
+    this.audio.start();
+    this.level = level;
+    this.score = 0;
+    this.lives = LIVES_START;
+    this.reviveGrace = false;
+    this.frightTimer = 0;
+    this.ghostChain = 0;
+    this.hud.setScore(0);
+    this.hud.setLevel(level);
+    this.hud.setLives(this.lives);
     this.hud.hideOverlay();
     this.buildLevel();
     this._enterReady();
@@ -252,7 +274,7 @@ class Game {
     if (this.player) this.followCam.applyInput(dx, dy);
     this.followCam.setLookBehind(this.input.lookBehindActive());
     this.background.update(dt);
-    this.world && this.world.update(dt);
+    this.world && this.world.update(dt, this.player, this.ghosts);
 
     if (this.state === 'playing') {
       this.player.update(dt, move, this.world, this.followCam.getFlatForward(new THREE.Vector3()), this.followCam.getFlatRight(new THREE.Vector3()));

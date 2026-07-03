@@ -10,6 +10,8 @@ export class HUD {
     this.messageEl = document.getElementById('message');
     this.overlay = document.getElementById('overlay');
     this.startBtn = document.getElementById('start-btn');
+    this.jumpLv2OverlayBtn = document.getElementById('jump-lv2-btn-overlay');
+    this.jumpLv2HudBtn = document.getElementById('jump-lv2-btn-hud');
     this.loadingEl = document.getElementById('loading');
   }
   setScore(v) { this.scoreEl.textContent = v; }
@@ -31,4 +33,10 @@ export class HUD {
   hideMessage() { this.messageEl.classList.remove('show'); }
   hideOverlay() { this.overlay.classList.add('hidden'); }
   showOverlay() { this.overlay.classList.remove('hidden'); }
+  setLocalTestMode(enabled) {
+    [this.jumpLv2OverlayBtn, this.jumpLv2HudBtn].forEach(btn => {
+      if (!btn) return;
+      btn.classList.toggle('show', enabled);
+    });
+  }
 }

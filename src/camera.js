@@ -20,6 +20,7 @@ export class FollowCamera {
     this.pitch = 0.0; // adjustable via mouse dy
     this.yaw = Math.PI;
     this.lookBehind = false;
+    this.lookBehindBlend = 0;
   }
 
   snap(player) {
@@ -41,7 +42,11 @@ export class FollowCamera {
   }
 
   _effectiveYaw() {
-    return this.yaw + (this.lookBehind ? Math.PI : 0);
+    return this.yaw + Math.PI * this.lookBehindBlend;
+  }
+
+  _effectivePitch() {
+    return this.pitch * (1 - this.lookBehindBlend);
   }
 
   getFlatForward(out = new THREE.Vector3()) {
@@ -57,14 +62,17 @@ export class FollowCamera {
   _compute(player, outPos, outLook) {
     player.getWorldPosition(_playerPos);
     this.getFlatForward(_camFwd);
+    const pitch = this._effectivePitch();
     outPos.copy(_playerPos)
       .addScaledVector(_camFwd, -DIST)
-      .addScaledVector(_up, HEIGHT + this.pitch * 6);
-    outLook.copy(_playerPos).addScaledVector(_camFwd, LOOK_AHEAD).addScaledVector(_up, 1.5 + this.pitch * 2.2);
+      .addScaledVector(_up, HEIGHT + pitch * 6);
+    outLook.copy(_playerPos).addScaledVector(_camFwd, LOOK_AHEAD).addScaledVector(_up, 1.5 + pitch * 2.2);
   }
 
   update(player, dt) {
     if (!this.initialized) { this.snap(player); return; }
+    const targetBlend = this.lookBehind ? 1 : 0;
+    this.lookBehindBlend += (targetBlend - this.lookBehindBlend) * Math.min(1, dt * 14);
     this._compute(player, _desired, _look);
     const k = 1 - Math.pow(0.0016, dt); // frame-rate independent smoothing
     this.camera.position.lerp(_desired, k);

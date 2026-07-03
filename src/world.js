@@ -13,7 +13,7 @@ const FACE_EFFECT_PLAN = {
   PX: 'mud',
   PZ: 'teleport',
   NX: 'speed',
-  NY: 'gate',
+  NY: 'classic',
   NZ: 'sanctuary'
 };
 const TETRA_EFFECT_PLAN = {
@@ -23,8 +23,10 @@ const TETRA_EFFECT_PLAN = {
   TD: 'hammer'
 };
 const EDGE_PORTAL_COOLDOWN = 2.0;
-const GATE_OPEN_TIME = 2.0;
-const GATE_CLOSED_TIME = 1.8;
+const SINKING_BLOCK_RAISED_HOLD = 2.1;
+const SINKING_BLOCK_LOWER_TIME = 0.9;
+const SINKING_BLOCK_LOWER_HOLD = 1.8;
+const SINKING_BLOCK_RAISE_TIME = 1.0;
 const PENDULUM_PERIOD = 3.2;
 const IRONBALL_PERIOD = 4.8;
 const HAMMER_PERIOD = 3.4;
@@ -233,19 +235,6 @@ export class World {
       this.effects[faceId].strips = strips;
     }
 
-    // Gate strip on NY
-    {
-      const faceId = 'NY';
-      const grid = this.data.faces[faceId].grid;
-      const cells = new Set();
-      const x0 = Math.floor(GRID / 2);
-      for (let y = 2; y < GRID - 2; y++) {
-        if (grid[y][x0] === PATH) cells.add(this._cellKey(x0, y));
-      }
-      this.effects[faceId].cells = cells;
-      this.effects[faceId].phase = 0.7;
-    }
-
     // Sanctuary pads on NZ
     {
       const faceId = 'NZ';
@@ -256,6 +245,39 @@ export class World {
         sanctuaries.push({ cell: seed });
       }
       this.effects[faceId].sanctuaries = sanctuaries;
+    }
+
+    // NY: a few existing wall blocks periodically sink to open temporary routes.
+    {
+      const faceId = 'NY';
+      const grid = this.data.faces[faceId].grid;
+      const candidates = [];
+      const protectedCells = [[0, MID], [GRID - 1, MID], [MID, 0], [MID, GRID - 1], [MID, MID]];
+      const isProtected = (x, y) => protectedCells.some(([px, py]) => Math.abs(px - x) + Math.abs(py - y) <= 2);
+      for (let y = 1; y < GRID - 1; y++) {
+        for (let x = 1; x < GRID - 1; x++) {
+          if (grid[y][x] !== 0) continue;
+          if (isProtected(x, y)) continue;
+          const horizontal = grid[y][x - 1] === PATH && grid[y][x + 1] === PATH;
+          const vertical = grid[y - 1][x] === PATH && grid[y + 1][x] === PATH;
+          if (!horizontal && !vertical) continue;
+          candidates.push({ cell: [x, y], axis: horizontal ? 'h' : 'v' });
+        }
+      }
+      for (let i = candidates.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+      }
+      const chosen = candidates.slice(0, Math.min(5, candidates.length)).map((c, index) => ({
+        ...c,
+        phase: index * 0.85 + Math.random() * 0.25,
+        progress: 1,
+        lastPassable: false,
+        mesh: null,
+        basePos: null
+      }));
+      this.effects[faceId].dynamicBlocks = chosen;
+      this.effects[faceId].dynamicBlockMap = new Map(chosen.map(block => [this._cellKey(block.cell[0], block.cell[1]), block]));
     }
   }
 
@@ -327,13 +349,15 @@ export class World {
     const geo = new THREE.BoxGeometry(CELL, WALL_HEIGHT, CELL);
     this.walls = new THREE.Group();
     this.wallMeshes = {};
+    this.wallCellIndex = {};
     const dummy = new THREE.Object3D();
     const q = new THREE.Quaternion();
     const pos = new THREE.Vector3();
 
     for (const id of this.faceIds) {
       const g = this.data.faces[id].grid;
-      const count = this._countCells((faceId, x, y, grid) => faceId === id && grid[y][x] === 0);
+      const dynamicMap = this.effects[id]?.dynamicBlockMap;
+      const count = this._countCells((faceId, x, y, grid) => faceId === id && grid[y][x] === 0 && !dynamicMap?.has(this._cellKey(x, y)));
       const style = FACE_STYLES[this.faceIds.indexOf(id) % FACE_STYLES.length];
       const tint = new THREE.Color(style.wallTint);
       const wallMap = this.topology.kind === 'tetra' ? makePrismWallTexture(style.wallTint) : null;
@@ -354,9 +378,11 @@ export class World {
       inst.receiveShadow = true;
       const f = this.faces[id];
       q.setFromUnitVectors(UP, f.n);
+      this.wallCellIndex[id] = {};
       let i = 0;
       for (let y = 0; y < GRID; y++) for (let x = 0; x < GRID; x++) {
         if (g[y][x] !== 0) continue;
+        if (dynamicMap?.has(this._cellKey(x, y))) continue;
         this.topology.faceGridToLocal(id, x, y, pos);
         pos.addScaledVector(f.n, WALL_HEIGHT / 2);
         dummy.position.copy(pos);
@@ -364,6 +390,7 @@ export class World {
         if (this.topology.kind === 'tetra') dummy.scale.set(0.86, 1, 0.86);
         else dummy.scale.set(1, 1, 1);
         dummy.updateMatrix();
+        this.wallCellIndex[id][this._cellKey(x, y)] = i;
         inst.setMatrixAt(i++, dummy.matrix);
       }
       inst.instanceMatrix.needsUpdate = true;
@@ -475,24 +502,6 @@ export class World {
       }
     }
 
-    // Gate visuals (NY)
-    this.gateMeshes = [];
-    const gateGeo = new THREE.BoxGeometry(CELL * 0.9, WALL_HEIGHT * 0.95, CELL * 0.12);
-    for (const key of this.effects.NY?.cells || []) {
-      const [x, y] = key.split(':').map(Number);
-      const f = this.faces.NY;
-      const base = this.topology.faceGridToLocal('NY', x, y, new THREE.Vector3());
-      const mesh = new THREE.Mesh(gateGeo, new THREE.MeshStandardMaterial({
-        color: 0xffc870, emissive: 0xffb34d, emissiveIntensity: 0.2,
-        roughness: 0.3, metalness: 0.1, transparent: true, opacity: 0.9
-      }));
-      mesh.position.copy(base).addScaledVector(f.n, 0.02);
-      mesh.quaternion.setFromUnitVectors(UP, f.n);
-      mesh.scale.y = 0.02;
-      this.effectMeshes.add(mesh);
-      this.gateMeshes.push(mesh);
-    }
-
     // Sanctuary visuals (NZ) - translucent protective domes
     this.sanctuaryMeshes = [];
     const domeGeo = new THREE.SphereGeometry(CELL * 0.44, 20, 14, 0, Math.PI * 2, 0, Math.PI / 2);
@@ -543,6 +552,35 @@ export class World {
       this.effectMeshes.add(core);
 
       this.sanctuaryMeshes.push({ shell, ring, core });
+    }
+
+    // NY dynamic sinking blocks reuse the existing wall language.
+    this.dynamicBlockMeshes = [];
+    const nyStyle = FACE_STYLES[this.faceIds.indexOf('NY') % FACE_STYLES.length];
+    const blockMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(nyStyle.wallTint),
+      roughness: 0.8,
+      metalness: 0.04,
+      envMapIntensity: 0.08,
+      emissive: new THREE.Color(nyStyle.wallTint).multiplyScalar(0.12),
+      emissiveIntensity: 0.1,
+      transparent: true,
+      opacity: 0.42,
+      depthWrite: false
+    });
+    const blockGeo = new THREE.BoxGeometry(CELL, WALL_HEIGHT, CELL);
+    for (const block of this.effects.NY?.dynamicBlocks || []) {
+      const [x, y] = block.cell;
+      const f = this.faces.NY;
+      const base = this.topology.faceGridToLocal('NY', x, y, new THREE.Vector3());
+      const mesh = new THREE.Mesh(blockGeo, blockMat.clone());
+      mesh.quaternion.setFromUnitVectors(UP, f.n);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.effectMeshes.add(mesh);
+      block.mesh = mesh;
+      block.basePos = base;
+      this.dynamicBlockMeshes.push(block);
     }
 
     this.group.add(this.effectMeshes);
@@ -658,20 +696,14 @@ export class World {
     this._dummy = dummy;
   }
 
-  _gateOpen(faceId) {
-    const fx = this.effects[faceId];
-    if (!fx || fx.type !== 'gate') return true;
-    const cycle = GATE_OPEN_TIME + GATE_CLOSED_TIME;
-    const t = (this._time + fx.phase) % cycle;
-    return t < GATE_OPEN_TIME;
-  }
-
   isBlocked(faceId, x, y) {
     if (x < 0 || x >= GRID || y < 0 || y >= GRID) return true;
     if (!this.topology.isCellUsable(faceId, x, y)) return true;
-    if (this.data.faces[faceId].grid[y][x] !== PATH) return true;
-    const fx = this.effects[faceId];
-    if (fx?.type === 'gate' && fx.cells.has(this._cellKey(x, y)) && !this._gateOpen(faceId)) return true;
+    if (this.data.faces[faceId].grid[y][x] !== PATH) {
+      const block = this.effects[faceId]?.dynamicBlockMap?.get(this._cellKey(x, y));
+      if (!block) return true;
+      return this._dynamicBlockProgress(block) > 0.18;
+    }
     return false;
   }
 
@@ -681,6 +713,68 @@ export class World {
 
   getEdgePortalEdge(faceId, x, y) {
     return this.topology.getEdgePortalEdge(faceId, x, y);
+  }
+
+  isFacePortalCoolingDown(faceId, edge) {
+    const pairKey = this._edgePortalKey(faceId, edge);
+    const state = this.edgePortalState.get(pairKey);
+    return !!(state && state.cooldown > 0);
+  }
+
+  _dynamicBlockProgress(block) {
+    const cycle = SINKING_BLOCK_RAISED_HOLD + SINKING_BLOCK_LOWER_TIME + SINKING_BLOCK_LOWER_HOLD + SINKING_BLOCK_RAISE_TIME;
+    let t = (this._time + block.phase) % cycle;
+    if (t < SINKING_BLOCK_RAISED_HOLD) return 1;
+    t -= SINKING_BLOCK_RAISED_HOLD;
+    if (t < SINKING_BLOCK_LOWER_TIME) return 1 - (t / SINKING_BLOCK_LOWER_TIME);
+    t -= SINKING_BLOCK_LOWER_TIME;
+    if (t < SINKING_BLOCK_LOWER_HOLD) return 0;
+    t -= SINKING_BLOCK_LOWER_HOLD;
+    return Math.min(1, t / SINKING_BLOCK_RAISE_TIME);
+  }
+
+  _findDisplacementCell(faceId, x, y, refU, refV) {
+    const candidates = [];
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (!this.isPassable(faceId, nx, ny)) continue;
+      candidates.push({ x: nx, y: ny, score: (refU - nx) ** 2 + (refV - ny) ** 2 });
+    }
+    candidates.sort((a, b) => a.score - b.score);
+    return candidates[0] || null;
+  }
+
+  _displacePlayer(player, target) {
+    player.u = target.x;
+    player.v = target.y;
+    player.syncTransform();
+  }
+
+  _displaceGhost(ghost, target) {
+    ghost.cx = target.x;
+    ghost.cy = target.y;
+    ghost.next = [target.x, target.y];
+    ghost.t = 0;
+    if (typeof ghost._pickInitialDir === 'function') ghost._pickInitialDir();
+    ghost.syncTransform(0);
+  }
+
+  _displaceActorsForBlock(block, player, ghosts) {
+    const [x, y] = block.cell;
+    if (player && player.face === 'NY' && Math.abs(player.u - x) < 0.45 && Math.abs(player.v - y) < 0.45) {
+      const target = this._findDisplacementCell('NY', x, y, player.u, player.v);
+      if (target) this._displacePlayer(player, target);
+    }
+    for (const ghost of ghosts || []) {
+      if (ghost.face !== 'NY') continue;
+      const gu = ghost.cx + (ghost.next[0] - ghost.cx) * ghost.t;
+      const gv = ghost.cy + (ghost.next[1] - ghost.cy) * ghost.t;
+      if (Math.abs(gu - x) < 0.4 && Math.abs(gv - y) < 0.4) {
+        const target = this._findDisplacementCell('NY', x, y, gu, gv);
+        if (target) this._displaceGhost(ghost, target);
+      }
+    }
   }
 
   getSpeedMultiplier(faceId, u, v, du = 0, dv = 0) {
@@ -900,7 +994,7 @@ export class World {
     }
   }
 
-  update(dt) {
+  update(dt, player = null, ghosts = []) {
     this._time += dt;
     if (this.rotating) {
       this._rotT += dt / CUBE_ROT_TIME;
@@ -927,14 +1021,6 @@ export class World {
       t.hole.scale.set(1, 0.5 + 0.08 * Math.sin(this._time * 3.8), 1);
     }
 
-    for (const g of this.gateMeshes || []) {
-      const open = this._gateOpen('NY');
-      g.visible = true;
-      const rise = open ? 0.02 : 1;
-      g.scale.y += (rise - g.scale.y) * Math.min(1, dt * 8);
-      if (!open) g.material.emissiveIntensity = 0.18 + 0.08 * Math.sin(this._time * 5);
-    }
-
     for (const s of this.sanctuaryMeshes || []) {
       const pulse = 0.92 + 0.08 * Math.sin(this._time * 3.2);
       s.shell.scale.setScalar(pulse);
@@ -942,6 +1028,19 @@ export class World {
       s.ring.rotation.z -= dt * 0.8;
       s.ring.material.emissiveIntensity = 0.28 + 0.08 * Math.sin(this._time * 4.1);
       s.core.material.opacity = 0.45 + 0.08 * Math.sin(this._time * 5.3);
+    }
+
+    for (const block of this.dynamicBlockMeshes || []) {
+      const prevPassable = block.lastPassable;
+      const progress = this._dynamicBlockProgress(block);
+      const scaleY = 0.02 + progress * 0.98;
+      block.progress = progress;
+      block.mesh.scale.set(1, scaleY, 1);
+      block.mesh.position.copy(block.basePos).addScaledVector(this.faces.NY.n, WALL_HEIGHT * scaleY * 0.5);
+      block.mesh.material.emissiveIntensity = 0.08 + progress * 0.1;
+      const passable = progress <= 0.18;
+      if (prevPassable && !passable) this._displaceActorsForBlock(block, player, ghosts);
+      block.lastPassable = passable;
     }
 
     this._updateLevel2Hazards(dt);

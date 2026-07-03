@@ -70,6 +70,7 @@ export function generateFace(seed) {
   carveInward(grid, GRID - 1, MID, -1, 0);
   carveInward(grid, MID, 0, 0, 1);
   carveInward(grid, MID, GRID - 1, 0, -1);
+  carvePortalClearance(grid);
   return buildPellets(grid, pickPowerCells(grid));
 }
 
@@ -141,6 +142,20 @@ function carveInward(grid, x, y, dx, dy) {
     grid[cy][cx] = PATH;
     cx += dx;
     cy += dy;
+  }
+}
+
+function carvePortalClearance(grid) {
+  const portals = [[0, MID], [GRID - 1, MID], [MID, 0], [MID, GRID - 1]];
+  for (const [px, py] of portals) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const x = px + dx;
+        const y = py + dy;
+        if (!inBounds(x, y)) continue;
+        grid[y][x] = PATH;
+      }
+    }
   }
 }
 
