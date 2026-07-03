@@ -14,7 +14,7 @@ const FACE_EFFECT_PLAN = {
   PX: 'mud',
   PZ: 'teleport'
 };
-const EDGE_PORTAL_COOLDOWN = 0.9;
+const EDGE_PORTAL_COOLDOWN = 2.0;
 
 function makeGridTexture(baseColor) {
   const s = 256;
@@ -71,6 +71,8 @@ export class World {
     this.effects = {};
     this._initFaceEffects();
     this.edgePortalState = new Map();
+    this.edgePortalTiles = new Map();
+    this.tilePairKeys = new Map();
 
     this.remaining = worldData.totalDots;
     this.faceRemaining = {};
@@ -440,9 +442,12 @@ export class World {
         q.setFromUnitVectors(UP, f.n); tile.quaternion.copy(q);
         tile.receiveShadow = true;
         this.portals.add(tile);
-        this.portalTiles.set(`${id}:${mid[0]}:${mid[1]}`, tile);
-
         const pairKey = this._edgePortalKey(id, e);
+        const tileKey = `${id}:${mid[0]}:${mid[1]}`;
+        this.portalTiles.set(tileKey, tile);
+        this.tilePairKeys.set(tileKey, pairKey);
+        if (!this.edgePortalTiles.has(pairKey)) this.edgePortalTiles.set(pairKey, []);
+        this.edgePortalTiles.get(pairKey).push(tile);
         if (!this.edgePortalVisuals.has(pairKey)) {
           const canvas = document.createElement('canvas');
           canvas.width = canvas.height = 128;
@@ -467,13 +472,13 @@ export class World {
     const ctx = canvas.getContext('2d');
     const s = canvas.width;
     ctx.clearRect(0, 0, s, s);
-    ctx.strokeStyle = 'rgba(255,255,255,0.16)';
-    ctx.lineWidth = 10;
+    ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+    ctx.lineWidth = 12;
     ctx.beginPath();
     ctx.arc(s / 2, s / 2, s * 0.28, 0, Math.PI * 2);
     ctx.stroke();
     ctx.strokeStyle = '#ffd21a';
-    ctx.lineWidth = 12;
+    ctx.lineWidth = 16;
     ctx.beginPath();
     ctx.arc(s / 2, s / 2, s * 0.28, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
     ctx.stroke();
@@ -484,6 +489,11 @@ export class World {
     const state = this.edgePortalState.get(pairKey);
     if (state && state.cooldown > 0) return null;
     this.edgePortalState.set(pairKey, { cooldown: EDGE_PORTAL_COOLDOWN, by: kind });
+    for (const tile of this.edgePortalTiles.get(pairKey) || []) {
+      tile.material.color.setHex(0x1b2b20);
+      tile.material.emissive.setHex(0x000000);
+      tile.material.emissiveIntensity = 0.02;
+    }
     return crossEdge(faceId, edge);
   }
 
@@ -493,11 +503,19 @@ export class World {
     if (key === this._activePortalKey) return;
     if (this._activePortalKey && this.portalTiles.has(this._activePortalKey)) {
       const m = this.portalTiles.get(this._activePortalKey).material;
-      m.color.setHex(0x2ecb74); m.emissive.setHex(0x0f7a44); m.emissiveIntensity = 0.35;
+      const prevPairKey = this.tilePairKeys.get(this._activePortalKey);
+      const prevState = prevPairKey ? this.edgePortalState.get(prevPairKey) : null;
+      if (!prevState || prevState.cooldown <= 0) {
+        m.color.setHex(0x2ecb74); m.emissive.setHex(0x0f7a44); m.emissiveIntensity = 0.35;
+      }
     }
     if (this.portalTiles.has(key)) {
+      const pairKey = this.tilePairKeys.get(key);
+      const state = pairKey ? this.edgePortalState.get(pairKey) : null;
       const m = this.portalTiles.get(key).material;
-      m.color.setHex(0xffd21a); m.emissive.setHex(0xff9e1a); m.emissiveIntensity = 0.8;
+      if (!state || state.cooldown <= 0) {
+        m.color.setHex(0xffd21a); m.emissive.setHex(0xff9e1a); m.emissiveIntensity = 0.8;
+      }
       this._activePortalKey = key;
     } else {
       this._activePortalKey = null;
@@ -602,12 +620,24 @@ export class World {
       const state = this.edgePortalState.get(key);
       if (state && state.cooldown > 0) {
         state.cooldown = Math.max(0, state.cooldown - dt);
-        const p = state.cooldown / EDGE_PORTAL_COOLDOWN;
+        const p = 1 - (state.cooldown / EDGE_PORTAL_COOLDOWN);
         this._drawCooldownCanvas(vis.canvas, p);
         vis.tex.needsUpdate = true;
         vis.meshes.forEach(m => { m.visible = true; });
+        const color = new THREE.Color(0x1b2b20).lerp(new THREE.Color(0x2ecb74), p);
+        const glow = 0.02 + 0.33 * p;
+        for (const tile of this.edgePortalTiles.get(key) || []) {
+          tile.material.color.copy(color);
+          tile.material.emissive.setHex(0x0f7a44);
+          tile.material.emissiveIntensity = glow;
+        }
         if (state.cooldown <= 0) {
           vis.meshes.forEach(m => { m.visible = false; });
+          for (const tile of this.edgePortalTiles.get(key) || []) {
+            tile.material.color.setHex(0x2ecb74);
+            tile.material.emissive.setHex(0x0f7a44);
+            tile.material.emissiveIntensity = 0.35;
+          }
         }
       }
     }
