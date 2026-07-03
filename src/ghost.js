@@ -29,9 +29,10 @@ export class Ghost {
     this.dir = [0, -1];
     this.next = [this.cx, this.cy - 1];
     this.t = 0;
-    this.mode = 'chase';           // chase | frightened | eaten
+    this.mode = 'chase';           // chase | frightened | eaten | recover
     this.frightTimeLeft = 0;
     this.teleportCooldown = 0;
+    this.recoverTimer = 0;
     this._buildMesh();
     this._pickInitialDir();
     this.syncTransform(0);
@@ -125,7 +126,8 @@ export class Ghost {
     // Eaten: go home (route across faces).
     if (this.mode === 'eaten') {
       if (this.face === this.home.face && this.cx === this.home.x && this.cy === this.home.y) {
-        this.mode = 'chase';
+        this.mode = 'recover';
+        this.recoverTimer = 1.5;
       } else if (this.face !== this.home.face) {
         const edge = FACE_NEXT_HOP[this.face][this.home.face];
         if (cellPortalEdge(this.cx, this.cy) === edge) return this._cross(edge);
@@ -185,6 +187,10 @@ export class Ghost {
 
   update(dt, player, frightFlash, safeMode = false, world = null) {
     this.teleportCooldown = Math.max(0, this.teleportCooldown - dt);
+    if (this.mode === 'recover') {
+      this.recoverTimer -= dt;
+      if (this.recoverTimer <= 0) this.mode = 'chase';
+    }
     if (world) this.terrainMul = world.getSpeedMultiplier(this.face, this.cx + (this.next[0] - this.cx) * this.t, this.cy + (this.next[1] - this.cy) * this.t);
     const cps = this.speed / CELL;
     this.t += cps * dt;
@@ -205,6 +211,11 @@ export class Ghost {
       this.bodyMat.emissiveIntensity = 0.5;
     } else if (this.mode === 'eaten') {
       this.body.visible = false;
+    } else if (this.mode === 'recover') {
+      this.body.visible = true;
+      this.bodyMat.color.setHex(0xffffff);
+      this.bodyMat.emissive.setHex(0xb0d8ff);
+      this.bodyMat.emissiveIntensity = 0.15;
     } else {
       this.body.visible = true;
       this.bodyMat.color.setHex(this.color);
@@ -236,7 +247,7 @@ export class Ghost {
 
   respawn() {
     this.face = this.home.face; this.cx = this.home.x; this.cy = this.home.y;
-    this.t = 0; this.mode = 'chase'; this._pickInitialDir();
+    this.t = 0; this.mode = 'chase'; this.recoverTimer = 0; this._pickInitialDir();
     this.syncTransform(0);
   }
 }

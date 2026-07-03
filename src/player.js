@@ -22,6 +22,7 @@ export class Player {
     this.alive = true;
     this._desiredHeading = 0;
     this.teleportCooldown = 0;
+    this.teleportLockKey = null;
 
     this._buildMesh();
     this.syncTransform();
@@ -265,6 +266,8 @@ export class Player {
 
   respawn(face, u, v) {
     this.face = face; this.u = u; this.v = v; this.heading = 0; this.alive = true;
+    this.teleportCooldown = 0;
+    this.teleportLockKey = null;
     this.syncTransform();
   }
 }

@@ -265,7 +265,8 @@ export class World {
     }
 
     // Teleporter visuals
-    const holeGeo = new THREE.CylinderGeometry(CELL * 0.36, CELL * 0.58, 0.22, 28);
+    const holeGeo = new THREE.CylinderGeometry(CELL * 0.18, CELL * 0.62, 0.34, 28);
+    const coreGeo = new THREE.CylinderGeometry(CELL * 0.08, CELL * 0.34, 0.22, 24);
     const rimGeo = new THREE.TorusGeometry(CELL * 0.44, 0.08, 10, 24);
     const pairColors = [0x7f6bff, 0xff8fb8];
     let pairIndex = 0;
@@ -274,11 +275,20 @@ export class World {
       const holeMat = new THREE.MeshStandardMaterial({
         color: 0x07070b,
         emissive: color,
-        emissiveIntensity: 0.32,
+        emissiveIntensity: 0.22,
         roughness: 0.92,
         metalness: 0.0,
         transparent: true,
         opacity: 0.98
+      });
+      const coreMat = new THREE.MeshStandardMaterial({
+        color: 0x030308,
+        emissive: color,
+        emissiveIntensity: 0.1,
+        roughness: 1,
+        metalness: 0,
+        transparent: true,
+        opacity: 0.95
       });
       const rimMat = new THREE.MeshStandardMaterial({
         color,
@@ -297,8 +307,14 @@ export class World {
         const hole = new THREE.Mesh(holeGeo, holeMat);
         hole.position.copy(base).addScaledVector(f.n, 0.02);
         hole.quaternion.setFromUnitVectors(UP, f.n);
-        hole.scale.y = 0.3;
+        hole.scale.y = 0.5;
         this.effectMeshes.add(hole);
+
+        const core = new THREE.Mesh(coreGeo, coreMat);
+        core.position.copy(base).addScaledVector(f.n, 0.015);
+        core.quaternion.setFromUnitVectors(UP, f.n);
+        core.scale.y = 0.45;
+        this.effectMeshes.add(core);
 
         const rim = new THREE.Mesh(rimGeo, rimMat);
         rim.position.copy(base).addScaledVector(f.n, 0.16);
@@ -373,18 +389,18 @@ export class World {
   }
 
   tryTeleportPlayer(player) {
-    if (player.teleportCooldown > 0) return false;
     const fx = this.effects[player.face];
     if (!fx || fx.type !== 'teleport') return false;
     const key = this._cellKey(player.cellX, player.cellY);
+    if (player.teleportLockKey && key !== player.teleportLockKey) player.teleportLockKey = null;
+    if (player.teleportCooldown > 0) return false;
+    if (player.teleportLockKey === key) return false;
     const dest = fx.map.get(key);
     if (!dest) return false;
-    const dx = Math.sin(player.heading);
-    const dy = Math.cos(player.heading);
-    // Drop out one full cell beyond the destination pad, away from immediate re-trigger.
-    player.u = dest[0] + dx * 1.05;
-    player.v = dest[1] + dy * 1.05;
-    player.teleportCooldown = 0.8;
+    player.u = dest[0];
+    player.v = dest[1];
+    player.teleportLockKey = this._cellKey(dest[0], dest[1]);
+    player.teleportCooldown = 0.1;
     return true;
   }
 
