@@ -16,8 +16,8 @@ function makeGridTexture(baseColor) {
   c.width = c.height = s;
   const ctx = c.getContext('2d');
   const rgb = new THREE.Color(baseColor);
-  const dark = `rgb(${Math.round(rgb.r * 120)}, ${Math.round(rgb.g * 120)}, ${Math.round(rgb.b * 145)})`;
-  const light = `rgb(${Math.round(120 + rgb.r * 100)}, ${Math.round(126 + rgb.g * 100)}, ${Math.round(140 + rgb.b * 105)})`;
+  const dark = `rgb(${Math.round(18 + rgb.r * 44)}, ${Math.round(20 + rgb.g * 46)}, ${Math.round(24 + rgb.b * 52)})`;
+  const light = `rgb(${Math.round(34 + rgb.r * 60)}, ${Math.round(36 + rgb.g * 62)}, ${Math.round(40 + rgb.b * 68)})`;
   const g = ctx.createLinearGradient(0, 0, s, s);
   g.addColorStop(0, dark);
   g.addColorStop(1, light);
@@ -25,13 +25,13 @@ function makeGridTexture(baseColor) {
   ctx.fillRect(0, 0, s, s);
 
   // Subtle crystal / marble veining.
-  for (let i = 0; i < 22; i++) {
+  for (let i = 0; i < 14; i++) {
     const x = Math.random() * s;
     const y = Math.random() * s;
     const len = 70 + Math.random() * 120;
     const angle = Math.random() * Math.PI * 2;
-    ctx.strokeStyle = `rgba(255,255,255,${0.045 + Math.random() * 0.035})`;
-    ctx.lineWidth = 1.5 + Math.random() * 2.5;
+    ctx.strokeStyle = `rgba(255,255,255,${0.02 + Math.random() * 0.02})`;
+    ctx.lineWidth = 1 + Math.random() * 1.3;
     ctx.beginPath();
     ctx.moveTo(x, y);
     for (let t = 0; t < 4; t++) {
@@ -42,8 +42,8 @@ function makeGridTexture(baseColor) {
     ctx.stroke();
   }
 
-  ctx.strokeStyle = 'rgba(255,255,255,0.07)';
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1.5;
   const step = s / GRID;
   for (let i = 0; i <= GRID; i++) {
     ctx.beginPath(); ctx.moveTo(i * step, 0); ctx.lineTo(i * step, s); ctx.stroke();
@@ -88,17 +88,14 @@ export class World {
     FACE_IDS.forEach((id, index) => {
       const style = FACE_STYLES[index % FACE_STYLES.length];
       const tex = makeGridTexture(style.floorTint);
-      const mat = new THREE.MeshPhysicalMaterial({
+      const mat = new THREE.MeshStandardMaterial({
         map: tex,
-        color: 0xf4f8ff,
-        roughness: 0.18,
-        metalness: 0.04,
-        clearcoat: 1,
-        clearcoatRoughness: 0.12,
-        reflectivity: 0.9,
-        envMapIntensity: 0.85,
-        emissive: new THREE.Color(style.floorTint).multiplyScalar(0.16),
-        emissiveIntensity: 0.14
+        color: 0xaeb6c2,
+        roughness: 0.72,
+        metalness: 0.01,
+        envMapIntensity: 0.06,
+        emissive: new THREE.Color(style.floorTint).multiplyScalar(0.1),
+        emissiveIntensity: 0.1
       });
       this.floorMats.push(mat);
       const m = new THREE.Mesh(geo, mat);
@@ -120,25 +117,31 @@ export class World {
   }
 
   _buildWalls() {
-    const count = this._countCells((id, x, y, g) => g[y][x] === 0);
     const geo = new THREE.BoxGeometry(CELL, WALL_HEIGHT, CELL);
-    this.wallMat = new THREE.MeshStandardMaterial({
-      color: COLORS.wall, roughness: 0.72, metalness: 0.05, envMapIntensity: 0.35,
-      emissive: new THREE.Color(COLORS.wallEmissive), emissiveIntensity: 0.14,
-      vertexColors: true
-    });
-    const inst = new THREE.InstancedMesh(geo, this.wallMat, count);
-    inst.castShadow = true; inst.receiveShadow = true;
+    this.walls = new THREE.Group();
     const dummy = new THREE.Object3D();
     const q = new THREE.Quaternion();
     const pos = new THREE.Vector3();
-    let i = 0;
+
     for (const id of FACE_IDS) {
+      const g = this.data.faces[id].grid;
+      const count = this._countCells((faceId, x, y, grid) => faceId === id && grid[y][x] === 0);
       const style = FACE_STYLES[FACE_IDS.indexOf(id) % FACE_STYLES.length];
       const tint = new THREE.Color(style.wallTint);
-      const g = this.data.faces[id].grid;
+      const mat = new THREE.MeshStandardMaterial({
+        color: tint,
+        roughness: 0.82,
+        metalness: 0.02,
+        envMapIntensity: 0.08,
+        emissive: tint.clone().multiplyScalar(0.12),
+        emissiveIntensity: 0.12
+      });
+      const inst = new THREE.InstancedMesh(geo, mat, count);
+      inst.castShadow = true;
+      inst.receiveShadow = true;
       const f = FACES[id];
       q.setFromUnitVectors(UP, f.n);
+      let i = 0;
       for (let y = 0; y < GRID; y++) for (let x = 0; x < GRID; x++) {
         if (g[y][x] !== 0) continue;
         faceGridToLocal(id, x, y, pos);
@@ -148,13 +151,11 @@ export class World {
         dummy.scale.set(1, 1, 1);
         dummy.updateMatrix();
         inst.setMatrixAt(i++, dummy.matrix);
-        inst.setColorAt(i - 1, tint);
       }
+      inst.instanceMatrix.needsUpdate = true;
+      this.walls.add(inst);
     }
-    inst.instanceMatrix.needsUpdate = true;
-    if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
-    this.walls = inst;
-    this.group.add(inst);
+    this.group.add(this.walls);
   }
 
   _buildPellets() {
@@ -282,8 +283,7 @@ export class World {
   }
 
   setTheme(theme) {
-    this.wallMat.emissive.setHex(theme.wallEmissive);
-    for (const m of this.floorMats) m.envMapIntensity = 0.22;
+    for (const m of this.floorMats) m.envMapIntensity = 0.06;
   }
 
   update(dt) {
