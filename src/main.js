@@ -6,7 +6,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import {
   LIVES_START, SCORE, FRIGHT_TIME, GHOST_NAMES, HALF, MID, themeForLevel
 } from './config.js';
-import { FACE_IDS, FACE_ADJ } from './cube.js';
+import { specForLevel } from './topology.js';
 import { generateWorld } from './maze.js';
 import { World } from './world.js';
 import { Player } from './player.js';
@@ -18,9 +18,6 @@ import { FollowCamera } from './camera.js';
 import { createComposer } from './postfx.js';
 import { Background } from './background.js';
 import { MiniMap } from './minimap.js';
-
-const START_FACE = 'PY';
-const GHOST_FACES = ['PX', 'NX', 'PZ', 'NZ'];
 
 class Game {
   constructor() {
@@ -96,7 +93,6 @@ class Game {
     this.background.setTheme(themeForLevel(1));
 
     this.followCam = new FollowCamera(this.camera);
-    this.minimap = new MiniMap();
     const { composer, bloom } = createComposer(this.renderer, this.scene, this.camera);
     this.composer = composer; this.bloom = bloom;
   }
@@ -108,22 +104,24 @@ class Game {
   buildLevel() {
     if (this.world) { this.scene.remove(this.world.group); }
     this.reviveGrace = false;
+    this.levelSpec = specForLevel(this.level);
     const theme = themeForLevel(this.level);
     this.background.setTheme(theme);
     Ghost.speedMul = theme.ghostSpeedMul;
 
-    const data = generateWorld(1000 + this.level * 131);
+    const data = generateWorld(1000 + this.level * 131, this.levelSpec.topology);
     this.worldData = data;
-    this.world = new World(this.scene, data);
-    this.world.setActiveFaceImmediate(START_FACE);
+    this.world = new World(this.scene, data, this.levelSpec);
+    this.world.setActiveFaceImmediate(this.levelSpec.startFace);
     this.world.setTheme(theme);
+    this.minimap = new MiniMap(this.levelSpec.topology);
 
     const isWallFn = (face, x, y) => this.world.isBlocked(face, x, y);
     const isPathFn = (face, x, y) => this.world.isPassable(face, x, y);
 
-    this.player = new Player(this.world.group, START_FACE, isWallFn);
+    this.player = new Player(this.world.group, this.levelSpec.startFace, isWallFn, this.levelSpec.topology);
 
-    this.ghosts = GHOST_FACES.map((f, i) => new Ghost(this.world.group, i, { face: f, x: MID, y: MID }, isPathFn));
+    this.ghosts = this.levelSpec.ghostFaces.map((f, i) => new Ghost(this.world.group, i, { face: f, x: MID, y: MID }, isPathFn, this.levelSpec.topology));
 
     this.hud.setPellets(this.world.remaining, this.worldData.totalDots);
     this.followCam.snap(this.player);
@@ -151,8 +149,8 @@ class Game {
     const q = [[from, 0]];
     while (q.length) {
       const [cur, d] = q.shift();
-      for (const e of Object.keys(FACE_ADJ[cur])) {
-        const nb = FACE_ADJ[cur][e];
+      for (const e of Object.keys(this.levelSpec.topology.faceAdj[cur])) {
+        const nb = this.levelSpec.topology.faceAdj[cur][e];
         if (seen.has(nb)) continue;
         if (nb === to) return d + 1;
         seen.add(nb);
@@ -163,8 +161,8 @@ class Game {
   }
 
   _chooseRespawnFace() {
-    const candidates = FACE_IDS.filter(id => (this.world.faceRemaining[id] || 0) > 0);
-    if (!candidates.length) return START_FACE;
+    const candidates = this.levelSpec.topology.faceIds.filter(id => (this.world.faceRemaining[id] || 0) > 0);
+    if (!candidates.length) return this.levelSpec.startFace;
     let best = candidates[0];
     let bestScore = -Infinity;
     for (const face of candidates) {
@@ -252,6 +250,7 @@ class Game {
     const { dx, dy } = this.input.consumeMouse();
     const move = this.input.moveVector();
     if (this.player) this.followCam.applyInput(dx, dy);
+    this.followCam.setLookBehind(this.input.lookBehindActive());
     this.background.update(dt);
     this.world && this.world.update(dt);
 
@@ -263,6 +262,10 @@ class Game {
         const flash = this.frightTimer > 0 && this.frightTimer < 2.2;
         const hidden = this.world.isHidden(this.player.face, this.player.u, this.player.v);
         for (const g of this.ghosts) g.update(dt, this.player, flash, this.reviveGrace || hidden, this.world);
+        if (!this.reviveGrace && !hidden && this.player.portalGrace <= 0 && this.world.checkPlayerHazardHit(this.player)) {
+          this._playerDies();
+          return;
+        }
         this._handleCollisions();
         if (this.frightTimer > 0) {
           this.frightTimer -= dt;

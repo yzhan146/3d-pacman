@@ -8,6 +8,7 @@ export class Input {
     this.mouseDX = 0;
     this.mouseDY = 0;
     this.locked = false;
+    this.lookBehind = false;
     this.isTouch = window.matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window);
 
     this._bindKeyboard();
@@ -52,6 +53,8 @@ export class Input {
     this.joyBaseX = 0; this.joyBaseY = 0;
     this.joyRadius = 62;
     this.lookId = null; this.lookLastX = 0; this.lookLastY = 0;
+    this.lookBehindId = null;
+    this.lookBehind = false;
     this.touchLookSensitivity = 4.4;
 
     // joystick DOM
@@ -73,12 +76,44 @@ export class Input {
     document.body.appendChild(this.joyKnob);
 
     const hint = document.querySelector('.hint');
-    if (hint) hint.textContent = '左半屏拖动摇杆移动 · 右半屏拖动转视角';
+    if (hint) hint.textContent = '左半屏拖动摇杆移动 · 右半屏拖动转视角 · 按住回头看按钮观察身后';
+
+    this.lookBehindBtn = document.createElement('div');
+    this.lookBehindBtn.id = 'look-behind-btn';
+    this.lookBehindBtn.textContent = '回头看';
+    Object.assign(this.lookBehindBtn.style, {
+      position: 'fixed',
+      right: '18px',
+      bottom: '116px',
+      width: '88px',
+      height: '88px',
+      borderRadius: '50%',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'radial-gradient(circle at 35% 30%, rgba(205,245,255,0.95), rgba(75,165,255,0.6))',
+      border: '2px solid rgba(255,255,255,0.28)',
+      boxShadow: '0 12px 28px rgba(0,0,0,0.28)',
+      color: '#091220',
+      fontSize: '14px',
+      fontWeight: '700',
+      zIndex: '8',
+      pointerEvents: 'none',
+      opacity: '0.92'
+    });
+    document.body.appendChild(this.lookBehindBtn);
 
     this._onTouchStart = (e) => {
       if (this._overlayVisible()) return;
       for (const t of e.changedTouches) {
-        if (t.clientX < window.innerWidth * 0.5 && this.joyId === null) {
+        const btnRect = this.lookBehindBtn.getBoundingClientRect();
+        const onLookBehind = t.clientX >= btnRect.left && t.clientX <= btnRect.right && t.clientY >= btnRect.top && t.clientY <= btnRect.bottom;
+        if (onLookBehind && this.lookBehindId === null) {
+          this.lookBehindId = t.identifier;
+          this.lookBehind = true;
+          this.lookBehindBtn.style.transform = 'scale(0.96)';
+          this.lookBehindBtn.style.boxShadow = '0 0 26px rgba(80,180,255,0.55)';
+        } else if (t.clientX < window.innerWidth * 0.5 && this.joyId === null) {
           this.joyId = t.identifier;
           this.joyBaseX = t.clientX; this.joyBaseY = t.clientY;
           this._showJoy(t.clientX, t.clientY, t.clientX, t.clientY);
@@ -111,6 +146,12 @@ export class Input {
       for (const t of e.changedTouches) {
         if (t.identifier === this.joyId) { this.joyId = null; this.joyDX = 0; this.joyDY = 0; this._hideJoy(); }
         else if (t.identifier === this.lookId) { this.lookId = null; }
+        else if (t.identifier === this.lookBehindId) {
+          this.lookBehindId = null;
+          this.lookBehind = false;
+          this.lookBehindBtn.style.transform = '';
+          this.lookBehindBtn.style.boxShadow = '0 12px 28px rgba(0,0,0,0.28)';
+        }
       }
     };
     window.addEventListener('touchstart', this._onTouchStart, { passive: false });
@@ -145,5 +186,9 @@ export class Input {
     const dx = this.mouseDX, dy = this.mouseDY;
     this.mouseDX = 0; this.mouseDY = 0;
     return { dx, dy };
+  }
+
+  lookBehindActive() {
+    return this.lookBehind;
   }
 }

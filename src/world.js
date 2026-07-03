@@ -4,7 +4,6 @@ import * as THREE from 'three';
 import {
   CELL, HALF, WALL_HEIGHT, COLORS, CUBE_ROT_TIME, GRID, MID, FACE_STYLES
 } from './config.js';
-import { FACE_IDS, FACES, faceGridToLocal, CANON_QUAT, EDGES, edgeInfo, crossEdge } from './cube.js';
 import { PATH, DOT, POWER } from './maze.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -17,9 +16,18 @@ const FACE_EFFECT_PLAN = {
   NY: 'gate',
   NZ: 'sanctuary'
 };
+const TETRA_EFFECT_PLAN = {
+  TA: 'safe',
+  TB: 'pendulum',
+  TC: 'ironball',
+  TD: 'hammer'
+};
 const EDGE_PORTAL_COOLDOWN = 2.0;
 const GATE_OPEN_TIME = 2.0;
 const GATE_CLOSED_TIME = 1.8;
+const PENDULUM_PERIOD = 3.2;
+const IRONBALL_PERIOD = 4.8;
+const HAMMER_PERIOD = 3.4;
 
 function makeGridTexture(baseColor) {
   const s = 256;
@@ -66,10 +74,39 @@ function makeGridTexture(baseColor) {
   return tex;
 }
 
+function makePrismWallTexture(baseColor) {
+  const s = 256;
+  const c = document.createElement('canvas');
+  c.width = c.height = s;
+  const ctx = c.getContext('2d');
+  const base = new THREE.Color(baseColor);
+  const g = ctx.createLinearGradient(0, 0, s, s);
+  g.addColorStop(0, `rgb(${Math.round(65 + base.r * 110)}, ${Math.round(72 + base.g * 100)}, ${Math.round(80 + base.b * 110)})`);
+  g.addColorStop(1, `rgb(${Math.round(18 + base.r * 42)}, ${Math.round(22 + base.g * 38)}, ${Math.round(32 + base.b * 46)})`);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, s, s);
+  for (let i = -s; i < s * 2; i += 34) {
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.fillRect(i, 0, 10, s);
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    ctx.fillRect(i + 16, 0, 6, s);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(1, 1.2);
+  return tex;
+}
+
 export class World {
-  constructor(scene, worldData) {
+  constructor(scene, worldData, spec) {
     this.scene = scene;
     this.data = worldData;
+    this.spec = spec;
+    this.topology = spec.topology;
+    this.faceIds = this.topology.faceIds;
+    this.faces = this.topology.faces;
+    this.edges = this.topology.edges;
     this.group = new THREE.Group();
     scene.add(this.group);
 
@@ -97,8 +134,9 @@ export class World {
 
   _cellKey(x, y) { return `${x}:${y}`; }
   _edgePortalKey(faceId, edge) {
-    const a = FACES[faceId].n;
-    const b = edgeInfo(faceId, edge).neighborNormal;
+    const a = this.faces[faceId].n;
+    const dest = this.topology.crossEdge(faceId, edge);
+    const b = this.faces[dest.face].n;
     return [`${a.x},${a.y},${a.z}`, `${b.x},${b.y},${b.z}`].sort().join('|');
   }
 
@@ -116,7 +154,12 @@ export class World {
   }
 
   _initFaceEffects() {
-    for (const id of FACE_IDS) this.effects[id] = { type: FACE_EFFECT_PLAN[id] || 'classic' };
+    const plan = this.topology.kind === 'tetra' ? TETRA_EFFECT_PLAN : FACE_EFFECT_PLAN;
+    for (const id of this.faceIds) this.effects[id] = { type: plan[id] || 'classic' };
+    if (this.topology.kind === 'tetra') {
+      this._initLevel2Effects();
+      return;
+    }
 
     // Mud pits on PX
     {
@@ -216,15 +259,35 @@ export class World {
     }
   }
 
+  _initLevel2Effects() {
+    const pendulumFace = 'TB';
+    this.effects[pendulumFace].pendulums = [
+      { anchor: [MID - 2, MID - 1], phase: 0 },
+      { anchor: [MID + 2, MID - 1], phase: 1.3 }
+    ];
+
+    const ironFace = 'TC';
+    this.effects[ironFace].ballTrack = [
+      [2, MID], [MID - 1, MID], [MID + 2, MID], [GRID - 3, MID],
+      [MID + 1, MID - 2], [MID - 1, MID - 2]
+    ];
+
+    const hammerFace = 'TD';
+    this.effects[hammerFace].hammers = [
+      { cell: [MID - 2, MID - 1], phase: 0.3 },
+      { cell: [MID + 2, MID - 1], phase: 1.5 },
+      { cell: [MID, MID - 3], phase: 2.2 }
+    ];
+  }
+
   setActiveFaceImmediate(faceId) {
     this.activeFace = faceId;
-    this.group.quaternion.copy(CANON_QUAT[faceId]);
+    this.group.quaternion.copy(this.topology.canonQuat[faceId]);
   }
 
   _buildFloors() {
-    const geo = new THREE.BoxGeometry(GRID * CELL, 0.6, GRID * CELL);
     this.floorMats = [];
-    FACE_IDS.forEach((id, index) => {
+    this.faceIds.forEach((id, index) => {
       const style = FACE_STYLES[index % FACE_STYLES.length];
       const tex = makeGridTexture(style.floorTint);
       const mat = new THREE.MeshStandardMaterial({
@@ -234,13 +297,18 @@ export class World {
         metalness: 0.01,
         envMapIntensity: 0.06,
         emissive: new THREE.Color(style.floorTint).multiplyScalar(0.1),
-        emissiveIntensity: 0.1
+        emissiveIntensity: 0.1,
+        side: this.topology.kind === 'tetra' ? THREE.DoubleSide : THREE.FrontSide
       });
       this.floorMats.push(mat);
+      const geo = this.topology.kind === 'tetra'
+        ? new THREE.CircleGeometry(GRID * CELL * 0.56, 3)
+        : new THREE.BoxGeometry(GRID * CELL, 0.6, GRID * CELL);
       const m = new THREE.Mesh(geo, mat);
-      const f = FACES[id];
+      const f = this.faces[id];
       m.position.copy(f.n).multiplyScalar(HALF - 0.3);
-      m.quaternion.setFromUnitVectors(UP, f.n);
+      m.quaternion.setFromUnitVectors(this.topology.kind === 'tetra' ? ZAX : UP, f.n);
+      if (this.topology.kind === 'tetra') m.rotateOnAxis(f.n, Math.PI / 2);
       m.receiveShadow = true;
       this.group.add(m);
     });
@@ -248,7 +316,7 @@ export class World {
 
   _countCells(pred) {
     let n = 0;
-    for (const id of FACE_IDS) {
+    for (const id of this.faceIds) {
       const g = this.data.faces[id].grid;
       for (let y = 0; y < GRID; y++) for (let x = 0; x < GRID; x++) if (pred(id, x, y, g)) n++;
     }
@@ -263,12 +331,14 @@ export class World {
     const q = new THREE.Quaternion();
     const pos = new THREE.Vector3();
 
-    for (const id of FACE_IDS) {
+    for (const id of this.faceIds) {
       const g = this.data.faces[id].grid;
       const count = this._countCells((faceId, x, y, grid) => faceId === id && grid[y][x] === 0);
-      const style = FACE_STYLES[FACE_IDS.indexOf(id) % FACE_STYLES.length];
+      const style = FACE_STYLES[this.faceIds.indexOf(id) % FACE_STYLES.length];
       const tint = new THREE.Color(style.wallTint);
+      const wallMap = this.topology.kind === 'tetra' ? makePrismWallTexture(style.wallTint) : null;
       const mat = new THREE.MeshStandardMaterial({
+        map: wallMap,
         color: tint,
         roughness: 0.82,
         metalness: 0.02,
@@ -276,22 +346,23 @@ export class World {
         emissive: tint.clone().multiplyScalar(0.12),
         emissiveIntensity: 0.1,
         transparent: true,
-        opacity: 0.42,
+        opacity: this.topology.kind === 'tetra' ? 0.56 : 0.42,
         depthWrite: false
       });
       const inst = new THREE.InstancedMesh(geo, mat, count);
       inst.castShadow = true;
       inst.receiveShadow = true;
-      const f = FACES[id];
+      const f = this.faces[id];
       q.setFromUnitVectors(UP, f.n);
       let i = 0;
       for (let y = 0; y < GRID; y++) for (let x = 0; x < GRID; x++) {
         if (g[y][x] !== 0) continue;
-        faceGridToLocal(id, x, y, pos);
+        this.topology.faceGridToLocal(id, x, y, pos);
         pos.addScaledVector(f.n, WALL_HEIGHT / 2);
         dummy.position.copy(pos);
         dummy.quaternion.copy(q);
-        dummy.scale.set(1, 1, 1);
+        if (this.topology.kind === 'tetra') dummy.scale.set(0.86, 1, 0.86);
+        else dummy.scale.set(1, 1, 1);
         dummy.updateMatrix();
         inst.setMatrixAt(i++, dummy.matrix);
       }
@@ -305,6 +376,11 @@ export class World {
   _buildFaceEffects() {
     this.effectMeshes = new THREE.Group();
     this.teleportMeshes = [];
+    if (this.topology.kind === 'tetra') {
+      this._buildLevel2Effects();
+      this.group.add(this.effectMeshes);
+      return;
+    }
 
     // Mud visuals
     const mudMat = new THREE.MeshStandardMaterial({
@@ -314,8 +390,8 @@ export class World {
     const mudGeo = new THREE.CylinderGeometry(CELL * 0.4, CELL * 0.52, 0.12, 18);
     for (const key of this.effects.PX?.cells || []) {
       const [x, y] = key.split(':').map(Number);
-      const f = FACES.PX;
-      const base = faceGridToLocal('PX', x, y, new THREE.Vector3());
+      const f = this.faces.PX;
+      const base = this.topology.faceGridToLocal('PX', x, y, new THREE.Vector3());
       const mesh = new THREE.Mesh(mudGeo, mudMat);
       mesh.position.copy(base).addScaledVector(f.n, 0.05);
       mesh.quaternion.setFromUnitVectors(UP, f.n);
@@ -359,8 +435,8 @@ export class World {
       });
       for (const pad of pair) {
         const [x, y] = pad;
-        const f = FACES.PZ;
-        const base = faceGridToLocal('PZ', x, y, new THREE.Vector3());
+        const f = this.faces.PZ;
+        const base = this.topology.faceGridToLocal('PZ', x, y, new THREE.Vector3());
 
         const hole = new THREE.Mesh(holeGeo, holeMat);
         hole.position.copy(base).addScaledVector(f.n, 0.02);
@@ -387,8 +463,8 @@ export class World {
     for (const strip of this.effects.NX?.strips || []) {
       for (const key of strip.cells) {
         const [x, y] = key.split(':').map(Number);
-        const f = FACES.NX;
-        const base = faceGridToLocal('NX', x, y, new THREE.Vector3());
+        const f = this.faces.NX;
+        const base = this.topology.faceGridToLocal('NX', x, y, new THREE.Vector3());
         const mesh = new THREE.Mesh(speedGeo, new THREE.MeshStandardMaterial({
           color: 0x7ce6ff, emissive: 0x44cfff, emissiveIntensity: 0.18,
           roughness: 0.28, metalness: 0.02, transparent: true, opacity: 0.82
@@ -404,8 +480,8 @@ export class World {
     const gateGeo = new THREE.BoxGeometry(CELL * 0.9, WALL_HEIGHT * 0.95, CELL * 0.12);
     for (const key of this.effects.NY?.cells || []) {
       const [x, y] = key.split(':').map(Number);
-      const f = FACES.NY;
-      const base = faceGridToLocal('NY', x, y, new THREE.Vector3());
+      const f = this.faces.NY;
+      const base = this.topology.faceGridToLocal('NY', x, y, new THREE.Vector3());
       const mesh = new THREE.Mesh(gateGeo, new THREE.MeshStandardMaterial({
         color: 0xffc870, emissive: 0xffb34d, emissiveIntensity: 0.2,
         roughness: 0.3, metalness: 0.1, transparent: true, opacity: 0.9
@@ -423,8 +499,8 @@ export class World {
     const ringGeo2 = new THREE.TorusGeometry(CELL * 0.42, 0.05, 10, 28);
     for (const s of this.effects.NZ?.sanctuaries || []) {
       const [x, y] = s.cell;
-      const f = FACES.NZ;
-      const base = faceGridToLocal('NZ', x, y, new THREE.Vector3());
+      const f = this.faces.NZ;
+      const base = this.topology.faceGridToLocal('NZ', x, y, new THREE.Vector3());
 
       const shell = new THREE.Mesh(domeGeo, new THREE.MeshStandardMaterial({
         color: 0xaaf4ff,
@@ -472,11 +548,66 @@ export class World {
     this.group.add(this.effectMeshes);
   }
 
+  _buildLevel2Effects() {
+    this.hazardMeshes = { pendulums: [], balls: [], hammers: [] };
+
+    const pendulumFace = this.faces.TB;
+    const chainMat = new THREE.MeshStandardMaterial({ color: 0x3a3d46, roughness: 0.42, metalness: 0.75 });
+    const headMat = new THREE.MeshStandardMaterial({ color: 0x1a1e25, emissive: 0x080b10, emissiveIntensity: 0.15, roughness: 0.35, metalness: 0.86 });
+    for (const p of this.effects.TB?.pendulums || []) {
+      const anchorBase = this.topology.faceGridToLocal('TB', p.anchor[0], p.anchor[1], new THREE.Vector3()).addScaledVector(pendulumFace.n, 6.2);
+      const pivot = new THREE.Group();
+      pivot.position.copy(anchorBase);
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 4.4, 8), chainMat);
+      shaft.position.y = -2.2;
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.95, 18, 14), headMat);
+      head.scale.set(1.08, 1.08, 1.08);
+      head.position.y = -4.8;
+      pivot.add(shaft, head);
+      pivot.quaternion.setFromUnitVectors(UP, pendulumFace.n);
+      this.effectMeshes.add(pivot);
+      this.hazardMeshes.pendulums.push({ mesh: pivot, head, face: 'TB', phase: p.phase });
+    }
+
+    const trackFace = this.faces.TC;
+    const railMat = new THREE.MeshStandardMaterial({ color: 0x7a5a46, roughness: 0.74, metalness: 0.12, transparent: true, opacity: 0.7 });
+    const railPoints = (this.effects.TC?.ballTrack || []).map(([x, y]) => this.topology.faceGridToLocal('TC', x, y, new THREE.Vector3()).addScaledVector(trackFace.n, 0.4));
+    if (railPoints.length > 1) {
+      const rail = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(railPoints.concat([railPoints[0].clone()])),
+        new THREE.LineBasicMaterial({ color: 0xc08a68, transparent: true, opacity: 0.65 })
+      );
+      this.effectMeshes.add(rail);
+    }
+    const ball = new THREE.Mesh(
+      new THREE.SphereGeometry(1.28, 22, 18),
+      new THREE.MeshStandardMaterial({ color: 0x2b2f36, emissive: 0x12161c, emissiveIntensity: 0.12, roughness: 0.36, metalness: 0.82 })
+    );
+    ball.position.copy(railPoints[0] || new THREE.Vector3());
+    this.effectMeshes.add(ball);
+    this.hazardMeshes.balls.push({ mesh: ball, face: 'TC', points: railPoints });
+
+    const hammerFace = this.faces.TD;
+    for (const h of this.effects.TD?.hammers || []) {
+      const base = this.topology.faceGridToLocal('TD', h.cell[0], h.cell[1], new THREE.Vector3()).addScaledVector(hammerFace.n, 0.8);
+      const rig = new THREE.Group();
+      rig.position.copy(base);
+      rig.quaternion.setFromUnitVectors(UP, hammerFace.n);
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 3.4, 8), chainMat);
+      pole.position.y = 2.1;
+      const head = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.95, 1.2), headMat);
+      head.position.y = 0.5;
+      rig.add(pole, head);
+      this.effectMeshes.add(rig);
+      this.hazardMeshes.hammers.push({ mesh: rig, head, face: 'TD', phase: h.phase, baseY: base.y });
+    }
+  }
+
   _buildPellets() {
     this.registry = {};
     const dots = [];
     const powers = [];
-    for (const id of FACE_IDS) {
+    for (const id of this.faceIds) {
       const p = this.data.faces[id].pellets;
       const reg = Array.from({ length: GRID }, () => new Array(GRID).fill(null));
       let faceCount = 0;
@@ -498,8 +629,8 @@ export class World {
     const dummy = new THREE.Object3D();
     const pos = new THREE.Vector3();
     dots.forEach(([id, x, y], i) => {
-      const f = FACES[id];
-      faceGridToLocal(id, x, y, pos).addScaledVector(f.n, 1.0);
+      const f = this.faces[id];
+      this.topology.faceGridToLocal(id, x, y, pos).addScaledVector(f.n, 1.0);
       dummy.position.copy(pos); dummy.quaternion.identity(); dummy.scale.set(1, 1, 1);
       dummy.updateMatrix(); dotInst.setMatrixAt(i, dummy.matrix);
     });
@@ -515,8 +646,8 @@ export class World {
     });
     const powInst = new THREE.InstancedMesh(powGeo, powMat, Math.max(1, powers.length));
     powers.forEach(([id, x, y], i) => {
-      const f = FACES[id];
-      const p = faceGridToLocal(id, x, y, new THREE.Vector3()).addScaledVector(f.n, 1.2);
+      const f = this.faces[id];
+      const p = this.topology.faceGridToLocal(id, x, y, new THREE.Vector3()).addScaledVector(f.n, 1.2);
       this._powerData.push({ idx: i, pos: p.clone() });
       dummy.position.copy(p); dummy.quaternion.identity(); dummy.scale.set(1, 1, 1);
       dummy.updateMatrix(); powInst.setMatrixAt(i, dummy.matrix);
@@ -537,6 +668,7 @@ export class World {
 
   isBlocked(faceId, x, y) {
     if (x < 0 || x >= GRID || y < 0 || y >= GRID) return true;
+    if (!this.topology.isCellUsable(faceId, x, y)) return true;
     if (this.data.faces[faceId].grid[y][x] !== PATH) return true;
     const fx = this.effects[faceId];
     if (fx?.type === 'gate' && fx.cells.has(this._cellKey(x, y)) && !this._gateOpen(faceId)) return true;
@@ -548,11 +680,7 @@ export class World {
   }
 
   getEdgePortalEdge(faceId, x, y) {
-    if (x === 0 && y === Math.floor(GRID / 2)) return 'L';
-    if (x === GRID - 1 && y === Math.floor(GRID / 2)) return 'R';
-    if (x === Math.floor(GRID / 2) && y === 0) return 'B';
-    if (x === Math.floor(GRID / 2) && y === GRID - 1) return 'T';
-    return null;
+    return this.topology.getEdgePortalEdge(faceId, x, y);
   }
 
   getSpeedMultiplier(faceId, u, v, du = 0, dv = 0) {
@@ -603,11 +731,11 @@ export class World {
     this._activePortalKey = null;
     const geo = new THREE.BoxGeometry(CELL * 0.92, 0.5, CELL * 0.92);
     const q = new THREE.Quaternion();
-    for (const id of FACE_IDS) {
-      const f = FACES[id];
-      for (const e of EDGES) {
-        const mid = edgeInfo(id, e).mid;
-        const base = faceGridToLocal(id, mid[0], mid[1], new THREE.Vector3());
+    for (const id of this.faceIds) {
+      const f = this.faces[id];
+      for (const e of this.edges) {
+        const mid = this.topology.portalMids[e];
+        const base = this.topology.faceGridToLocal(id, mid[0], mid[1], new THREE.Vector3());
         const mat = new THREE.MeshStandardMaterial({
           color: 0x2ecb74, emissive: new THREE.Color(0x0f7a44), emissiveIntensity: 0.35,
           roughness: 0.6, metalness: 0.0
@@ -660,7 +788,7 @@ export class World {
   }
 
   tryUseFacePortal(kind, faceId, edge) {
-    if (kind === 'ghost-eye') return crossEdge(faceId, edge);
+    if (kind === 'ghost-eye') return this.topology.crossEdge(faceId, edge);
     const pairKey = this._edgePortalKey(faceId, edge);
     const state = this.edgePortalState.get(pairKey);
     if (state && state.cooldown > 0) return null;
@@ -670,7 +798,7 @@ export class World {
       tile.material.emissive.setHex(0x000000);
       tile.material.emissiveIntensity = 0.02;
     }
-    return crossEdge(faceId, edge);
+    return this.topology.crossEdge(faceId, edge);
   }
 
   // Highlight the portal tile the player is standing on (amber), reset others.
@@ -756,13 +884,20 @@ export class World {
   startRotation(faceId) {
     this.activeFace = faceId;
     this._fromQuat.copy(this.group.quaternion);
-    this._toQuat.copy(CANON_QUAT[faceId]);
+    this._toQuat.copy(this.topology.canonQuat[faceId]);
     this._rotT = 0;
     this.rotating = true;
   }
 
   setTheme(theme) {
     for (const m of this.floorMats) m.envMapIntensity = 0.06;
+    if (this.topology.kind === 'tetra') {
+      for (const inst of Object.values(this.wallMeshes)) {
+        const mat = inst.material;
+        mat.emissiveIntensity = 0.18;
+        mat.opacity = 0.56;
+      }
+    }
   }
 
   update(dt) {
@@ -809,6 +944,8 @@ export class World {
       s.core.material.opacity = 0.45 + 0.08 * Math.sin(this._time * 5.3);
     }
 
+    this._updateLevel2Hazards(dt);
+
     for (const [key, vis] of this.edgePortalVisuals.entries()) {
       const state = this.edgePortalState.get(key);
       if (state && state.cooldown > 0) {
@@ -839,7 +976,7 @@ export class World {
   _powerRegByIdx(idx) {
     if (!this._powerIdxMap) {
       this._powerIdxMap = {};
-      for (const id of FACE_IDS) {
+      for (const id of this.faceIds) {
         const reg = this.registry[id];
         for (let y = 0; y < GRID; y++) for (let x = 0; x < GRID; x++) {
           const r = reg[y][x];
@@ -851,8 +988,53 @@ export class World {
   }
 
   worldPos(faceId, u, v, out = new THREE.Vector3()) {
-    faceGridToLocal(faceId, u, v, out);
+    this.topology.faceGridToLocal(faceId, u, v, out);
     return this.group.localToWorld(out);
+  }
+
+  _updateLevel2Hazards(dt) {
+    if (this.topology.kind !== 'tetra') return;
+    for (const p of this.hazardMeshes?.pendulums || []) {
+      const swing = Math.sin((this._time + p.phase) * (Math.PI * 2 / PENDULUM_PERIOD)) * 0.72;
+      p.mesh.rotation.z = swing;
+      p.head.material.emissiveIntensity = 0.08 + 0.06 * Math.abs(swing);
+    }
+    for (const b of this.hazardMeshes?.balls || []) {
+      if (!b.points.length) continue;
+      const count = b.points.length;
+      const t = ((this._time / IRONBALL_PERIOD) % 1) * count;
+      const i0 = Math.floor(t) % count;
+      const i1 = (i0 + 1) % count;
+      const frac = t - Math.floor(t);
+      b.mesh.position.copy(b.points[i0]).lerp(b.points[i1], frac);
+      b.mesh.rotation.z += dt * 2.4;
+      b.mesh.rotation.x += dt * 1.6;
+    }
+    for (const h of this.hazardMeshes?.hammers || []) {
+      const cycle = (this._time + h.phase) % HAMMER_PERIOD;
+      const strike = cycle < 0.6 ? 1 : cycle < 1.0 ? 0.12 : cycle < 2.0 ? 0.12 : 0.75;
+      h.mesh.position.y += ((h.baseY - 0.4 + strike * 2.8) - h.mesh.position.y) * Math.min(1, dt * 12);
+      h.mesh.rotation.z = cycle < 0.35 ? 0.08 : 0;
+      h.head.material.emissiveIntensity = cycle < 0.45 ? 0.28 : 0.12;
+    }
+  }
+
+  checkPlayerHazardHit(player) {
+    if (this.topology.kind !== 'tetra') return false;
+    const pp = player.getWorldPosition(new THREE.Vector3());
+    for (const p of this.hazardMeshes?.pendulums || []) {
+      if (player.face !== p.face) continue;
+      if (pp.distanceTo(p.head.getWorldPosition(new THREE.Vector3())) < 2.1) return true;
+    }
+    for (const b of this.hazardMeshes?.balls || []) {
+      if (player.face !== b.face) continue;
+      if (pp.distanceTo(b.mesh.getWorldPosition(new THREE.Vector3())) < 2.6) return true;
+    }
+    for (const h of this.hazardMeshes?.hammers || []) {
+      if (player.face !== h.face) continue;
+      if (pp.distanceTo(h.head.getWorldPosition(new THREE.Vector3())) < 2.3) return true;
+    }
+    return false;
   }
 }
 

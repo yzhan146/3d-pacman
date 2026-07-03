@@ -5,23 +5,15 @@ import * as THREE from 'three';
 import {
   GRID, MID, CELL, COLORS, GHOST_SPEED, GHOST_FRIGHT_SPEED, FRIGHT_COLOR, FRIGHT_FLASH
 } from './config.js';
-import { FACES, faceGridToLocal, crossEdge, edgeInfo, FACE_NEXT_HOP } from './cube.js';
 
 const DIRS = { R: [1, 0], L: [-1, 0], T: [0, 1], B: [0, -1] };
 
-function cellPortalEdge(x, y) {
-  if (x === 0 && y === MID) return 'L';
-  if (x === GRID - 1 && y === MID) return 'R';
-  if (x === MID && y === 0) return 'B';
-  if (x === MID && y === GRID - 1) return 'T';
-  return null;
-}
-
 export class Ghost {
-  constructor(group, index, home, isPathFn) {
+  constructor(group, index, home, isPathFn, topology) {
     this.group = group;
     this.index = index;
     this.isPath = isPathFn;
+    this.topology = topology;
     this.color = COLORS.ghosts[index];
     this.home = { ...home };
     this.face = home.face;
@@ -108,8 +100,8 @@ export class Ghost {
   _target(player) {
     // Different face -> head to the routing portal midpoint.
     if (this.face !== player.face) {
-      const edge = FACE_NEXT_HOP[this.face][player.face];
-      return { cross: edge, cell: edgeInfo(this.face, edge).mid };
+      const edge = this.topology.faceNextHop[this.face][player.face];
+      return { cross: edge, cell: this.topology.portalMids[edge] };
     }
     const px = player.cellX, py = player.cellY;
     let tx = px, ty = py;
@@ -130,9 +122,9 @@ export class Ghost {
         this.mode = 'recover';
         this.recoverTimer = 1.5;
       } else if (this.face !== this.home.face) {
-        const edge = FACE_NEXT_HOP[this.face][this.home.face];
-        if (cellPortalEdge(this.cx, this.cy) === edge) return this._cross(edge, world);
-        return this._greedy(edgeInfo(this.face, edge).mid);
+        const edge = this.topology.faceNextHop[this.face][this.home.face];
+        if (this.topology.getEdgePortalEdge(this.face, this.cx, this.cy) === edge) return this._cross(edge, world);
+        return this._greedy(this.topology.portalMids[edge]);
       } else {
         return this._greedy([this.home.x, this.home.y]);
       }
@@ -142,7 +134,7 @@ export class Ghost {
     if (this.mode === 'frightened') return this._random();
 
     const tgt = this._target(player);
-    if (tgt.cross && cellPortalEdge(this.cx, this.cy) === tgt.cross) return this._cross(tgt.cross, world);
+    if (tgt.cross && this.topology.getEdgePortalEdge(this.face, this.cx, this.cy) === tgt.cross) return this._cross(tgt.cross, world);
     return this._greedy(tgt.cell);
   }
 
@@ -178,7 +170,7 @@ export class Ghost {
 
   _cross(edge, world = null) {
     const kind = this.mode === 'eaten' ? 'ghost-eye' : 'ghost';
-    const a = world ? world.tryUseFacePortal(kind, this.face, edge) : crossEdge(this.face, edge);
+    const a = world ? world.tryUseFacePortal(kind, this.face, edge) : this.topology.crossEdge(this.face, edge);
     if (!a) return this._random();
     this.face = a.face;
     this.cx = a.cell[0]; this.cy = a.cell[1];
@@ -230,10 +222,10 @@ export class Ghost {
   }
 
   syncTransform(t) {
-    const f = FACES[this.face];
+    const f = this.topology.faces[this.face];
     const u = this.cx + (this.next[0] - this.cx) * t;
     const v = this.cy + (this.next[1] - this.cy) * t;
-    faceGridToLocal(this.face, u, v, this._localPos);
+    this.topology.faceGridToLocal(this.face, u, v, this._localPos);
     this._localPos.addScaledVector(f.n, 1.4);
     this.mesh.position.copy(this._localPos);
 

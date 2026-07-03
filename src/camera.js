@@ -19,6 +19,7 @@ export class FollowCamera {
     this.initialized = false;
     this.pitch = 0.0; // adjustable via mouse dy
     this.yaw = Math.PI;
+    this.lookBehind = false;
   }
 
   snap(player) {
@@ -35,8 +36,17 @@ export class FollowCamera {
     this.pitch = THREE.MathUtils.clamp(this.pitch + mouseDY * 0.0015, -0.6, 0.8);
   }
 
+  setLookBehind(active) {
+    this.lookBehind = !!active;
+  }
+
+  _effectiveYaw() {
+    return this.yaw + (this.lookBehind ? Math.PI : 0);
+  }
+
   getFlatForward(out = new THREE.Vector3()) {
-    return out.set(Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
+    const yaw = this._effectiveYaw();
+    return out.set(Math.sin(yaw), 0, -Math.cos(yaw)).normalize();
   }
 
   getFlatRight(out = new THREE.Vector3()) {

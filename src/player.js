@@ -4,16 +4,16 @@
 // portals, which triggers the world rotation.
 import * as THREE from 'three';
 import { GRID, MID, CELL, PLAYER_RADIUS, PLAYER_SPEED, COLORS } from './config.js';
-import { FACES, faceGridToLocal, crossEdge } from './cube.js';
 
 const RC = PLAYER_RADIUS / CELL;
 const COLLISION_RC = RC * 0.84; // slightly forgiving collision radius for smoother corners
 const CORNER_ASSIST = 0.14;     // tiny auto-centering nudge when scraping corners
 
 export class Player {
-  constructor(group, startFace, isWallFn) {
+  constructor(group, startFace, isWallFn, topology) {
     this.group = group;
     this.isWall = isWallFn;
+    this.topology = topology;
     this.face = startFace;
     this.u = MID; this.v = MID;
     this.heading = 0;
@@ -107,7 +107,7 @@ export class Player {
   }
 
   localForward(out = new THREE.Vector3()) {
-    const f = FACES[this.face];
+    const f = this.topology.faces[this.face];
     const s = Math.sin(this.heading), c = Math.cos(this.heading);
     out.set(0, 0, 0).addScaledVector(f.r, s).addScaledVector(f.u, c);
     return out.normalize();
@@ -126,7 +126,7 @@ export class Player {
   _cellWall(x, y) {
     if (x === GRID && y === MID) return false;
     if (x === -1 && y === MID) return false;
-    if (y === GRID && x === MID) return false;
+    if (this.topology.kind === 'cube' && y === GRID && x === MID) return false;
     if (y === -1 && x === MID) return false;
     if (x < 0 || x >= GRID || y < 0 || y >= GRID) return true;
     return this.isWall(this.face, x, y);
@@ -190,8 +190,8 @@ export class Player {
   }
 
   syncTransform() {
-    const f = FACES[this.face];
-    faceGridToLocal(this.face, this.u, this.v, this._localPos);
+    const f = this.topology.faces[this.face];
+    this.topology.faceGridToLocal(this.face, this.u, this.v, this._localPos);
     this._localPos.addScaledVector(f.n, PLAYER_RADIUS);
     this.mesh.position.copy(this._localPos);
 
@@ -215,8 +215,8 @@ export class Player {
       if ((f !== 0 || s !== 0) && cameraForwardWorld && cameraRightWorld) {
         const desiredWorld = cameraForwardWorld.clone().multiplyScalar(f).addScaledVector(cameraRightWorld, s);
         const desiredLocal = desiredWorld.applyQuaternion(this.group.quaternion.clone().invert());
-        let du = desiredLocal.dot(FACES[this.face].r);
-        let dv = desiredLocal.dot(FACES[this.face].u);
+        let du = desiredLocal.dot(this.topology.faces[this.face].r);
+        let dv = desiredLocal.dot(this.topology.faces[this.face].u);
         const len = Math.hypot(du, dv) || 1;
         const step = (PLAYER_SPEED * world.getSpeedMultiplier(this.face, this.u, this.v, du, dv) / CELL) * dt;
         du = du / len * step; dv = dv / len * step;
@@ -255,19 +255,14 @@ export class Player {
     let edge = world.getEdgePortalEdge(this.face, this.cellX, this.cellY);
     const lockKey = `${this.face}:${this.cellX}:${this.cellY}`;
     if (edge && this.edgePortalLockKey === lockKey) edge = null;
-    if (!edge) {
-      if (this.u > GRID - 1 + 0.5 && Math.abs(this.v - MID) < 0.7) edge = 'R';
-      else if (this.u < -0.5 && Math.abs(this.v - MID) < 0.7) edge = 'L';
-      else if (this.v > GRID - 1 + 0.5 && Math.abs(this.u - MID) < 0.7) edge = 'T';
-      else if (this.v < -0.5 && Math.abs(this.u - MID) < 0.7) edge = 'B';
-    }
+    if (!edge) edge = this.topology.detectExit(this.face, this.u, this.v);
     if (!edge) return;
 
     const a = world.tryUseFacePortal('player', this.face, edge);
     if (!a) {
       if (edge === 'R') this.u = GRID - 1 + 0.49;
       else if (edge === 'L') this.u = -0.49;
-      else if (edge === 'T') this.v = GRID - 1 + 0.49;
+      else if (edge === 'T') this.v = this.topology.kind === 'cube' ? GRID - 1 + 0.49 : -0.49;
       else if (edge === 'B') this.v = -0.49;
       return;
     }
