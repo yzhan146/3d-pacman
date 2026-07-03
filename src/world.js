@@ -12,9 +12,14 @@ const ZAX = new THREE.Vector3(0, 0, 1);
 const FACE_EFFECT_PLAN = {
   PY: 'classic',
   PX: 'mud',
-  PZ: 'teleport'
+  PZ: 'teleport',
+  NX: 'speed',
+  NY: 'gate',
+  NZ: 'wind'
 };
 const EDGE_PORTAL_COOLDOWN = 2.0;
+const GATE_OPEN_TIME = 2.0;
+const GATE_CLOSED_TIME = 1.8;
 
 function makeGridTexture(baseColor) {
   const s = 256;
@@ -165,6 +170,52 @@ export class World {
       this.effects[faceId].map = map;
       this.effects[faceId].pads = pads;
       this.effects[faceId].pairs = pairs;
+    }
+
+    // Speed strips on NX
+    {
+      const faceId = 'NX';
+      const grid = this.data.faces[faceId].grid;
+      const strips = [];
+      for (const y0 of [2, GRID - 3]) {
+        const cells = new Set();
+        for (let x = 1; x < GRID - 1; x++) {
+          for (let y = Math.max(0, y0 - 1); y <= Math.min(GRID - 1, y0 + 1); y++) {
+            if (grid[y][x] === PATH) cells.add(this._cellKey(x, y));
+          }
+        }
+        strips.push({ cells, dir: [1, 0] });
+      }
+      this.effects[faceId].strips = strips;
+    }
+
+    // Gate strip on NY
+    {
+      const faceId = 'NY';
+      const grid = this.data.faces[faceId].grid;
+      const cells = new Set();
+      const x0 = Math.floor(GRID / 2);
+      for (let y = 2; y < GRID - 2; y++) {
+        if (grid[y][x0] === PATH) cells.add(this._cellKey(x0, y));
+      }
+      this.effects[faceId].cells = cells;
+      this.effects[faceId].phase = 0.7;
+    }
+
+    // Wind corridors on NZ
+    {
+      const faceId = 'NZ';
+      const grid = this.data.faces[faceId].grid;
+      const zones = [];
+      const left = new Set();
+      const right = new Set();
+      for (let y = 1; y < GRID - 1; y++) {
+        for (let x = 1; x <= 3; x++) if (grid[y][x] === PATH) left.add(this._cellKey(x, y));
+        for (let x = GRID - 4; x < GRID - 1; x++) if (grid[y][x] === PATH) right.add(this._cellKey(x, y));
+      }
+      zones.push({ cells: left, dir: [0, 1] });
+      zones.push({ cells: right, dir: [0, -1] });
+      this.effects[faceId].zones = zones;
     }
   }
 
@@ -334,6 +385,61 @@ export class World {
       }
     }
 
+    // Speed strip visuals (NX)
+    const speedMat = new THREE.MeshStandardMaterial({
+      color: 0x78e4ff, emissive: 0x3bc9ff, emissiveIntensity: 0.22,
+      roughness: 0.35, metalness: 0.05, transparent: true, opacity: 0.82
+    });
+    const speedGeo = new THREE.BoxGeometry(CELL * 0.9, 0.1, CELL * 0.9);
+    for (const strip of this.effects.NX?.strips || []) {
+      for (const key of strip.cells) {
+        const [x, y] = key.split(':').map(Number);
+        const f = FACES.NX;
+        const base = faceGridToLocal('NX', x, y, new THREE.Vector3());
+        const mesh = new THREE.Mesh(speedGeo, speedMat);
+        mesh.position.copy(base).addScaledVector(f.n, 0.06);
+        mesh.quaternion.setFromUnitVectors(UP, f.n);
+        this.effectMeshes.add(mesh);
+      }
+    }
+
+    // Gate visuals (NY)
+    this.gateMeshes = [];
+    const gateGeo = new THREE.BoxGeometry(CELL * 0.9, WALL_HEIGHT * 0.95, CELL * 0.12);
+    for (const key of this.effects.NY?.cells || []) {
+      const [x, y] = key.split(':').map(Number);
+      const f = FACES.NY;
+      const base = faceGridToLocal('NY', x, y, new THREE.Vector3());
+      const mesh = new THREE.Mesh(gateGeo, new THREE.MeshStandardMaterial({
+        color: 0xffc870, emissive: 0xffb34d, emissiveIntensity: 0.2,
+        roughness: 0.3, metalness: 0.1, transparent: true, opacity: 0.9
+      }));
+      mesh.position.copy(base).addScaledVector(f.n, WALL_HEIGHT * 0.48);
+      mesh.quaternion.setFromUnitVectors(UP, f.n);
+      this.effectMeshes.add(mesh);
+      this.gateMeshes.push(mesh);
+    }
+
+    // Wind visuals (NZ)
+    this.windMeshes = [];
+    const windGeo = new THREE.BoxGeometry(CELL * 0.5, 0.04, CELL * 0.5);
+    const windMat = new THREE.MeshStandardMaterial({
+      color: 0xa6f6ff, emissive: 0x56d8ff, emissiveIntensity: 0.12,
+      roughness: 0.5, metalness: 0, transparent: true, opacity: 0.5
+    });
+    for (const zone of this.effects.NZ?.zones || []) {
+      for (const key of zone.cells) {
+        const [x, y] = key.split(':').map(Number);
+        const f = FACES.NZ;
+        const base = faceGridToLocal('NZ', x, y, new THREE.Vector3());
+        const mesh = new THREE.Mesh(windGeo, windMat);
+        mesh.position.copy(base).addScaledVector(f.n, 0.04);
+        mesh.quaternion.setFromUnitVectors(UP, f.n);
+        this.effectMeshes.add(mesh);
+        this.windMeshes.push({ mesh, dir: zone.dir });
+      }
+    }
+
     this.group.add(this.effectMeshes);
   }
 
@@ -392,11 +498,54 @@ export class World {
     this._dummy = dummy;
   }
 
-  getSpeedMultiplier(faceId, u, v) {
+  _gateOpen(faceId) {
     const fx = this.effects[faceId];
-    if (!fx || fx.type !== 'mud') return 1;
+    if (!fx || fx.type !== 'gate') return true;
+    const cycle = GATE_OPEN_TIME + GATE_CLOSED_TIME;
+    const t = (this._time + fx.phase) % cycle;
+    return t < GATE_OPEN_TIME;
+  }
+
+  isBlocked(faceId, x, y) {
+    if (x < 0 || x >= GRID || y < 0 || y >= GRID) return true;
+    if (this.data.faces[faceId].grid[y][x] !== PATH) return true;
+    const fx = this.effects[faceId];
+    if (fx?.type === 'gate' && fx.cells.has(this._cellKey(x, y)) && !this._gateOpen(faceId)) return true;
+    return false;
+  }
+
+  isPassable(faceId, x, y) {
+    return !this.isBlocked(faceId, x, y);
+  }
+
+  getEdgePortalEdge(faceId, x, y) {
+    if (x === 0 && y === Math.floor(GRID / 2)) return 'L';
+    if (x === GRID - 1 && y === Math.floor(GRID / 2)) return 'R';
+    if (x === Math.floor(GRID / 2) && y === 0) return 'B';
+    if (x === Math.floor(GRID / 2) && y === GRID - 1) return 'T';
+    return null;
+  }
+
+  getSpeedMultiplier(faceId, u, v, du = 0, dv = 0) {
+    const fx = this.effects[faceId];
+    if (!fx) return 1;
     const key = this._cellKey(Math.round(u), Math.round(v));
-    return fx.cells.has(key) ? 0.42 : 1;
+    if (fx.type === 'mud') return fx.cells.has(key) ? 0.42 : 1;
+    if (fx.type === 'speed') {
+      for (const strip of fx.strips || []) if (strip.cells.has(key)) return 1.65;
+      return 1;
+    }
+    if (fx.type === 'wind') {
+      const len = Math.hypot(du, dv) || 1;
+      for (const zone of fx.zones || []) {
+        if (zone.cells.has(key)) {
+          const align = (du / len) * zone.dir[0] + (dv / len) * zone.dir[1];
+          return THREE.MathUtils.clamp(1 + align * 0.55, 0.5, 1.55);
+        }
+      }
+      return 1;
+    }
+    return 1;
   }
 
   tryTeleportPlayer(player) {
@@ -614,6 +763,16 @@ export class World {
       const pulse = 0.9 + 0.12 * Math.sin(this._time * 4.5);
       t.core.scale.set(1, 0.45 * pulse, 1);
       t.hole.scale.set(1, 0.5 + 0.08 * Math.sin(this._time * 3.8), 1);
+    }
+
+    for (const g of this.gateMeshes || []) {
+      const open = this._gateOpen('NY');
+      g.visible = !open;
+      if (!open) g.material.emissiveIntensity = 0.18 + 0.08 * Math.sin(this._time * 5);
+    }
+
+    for (const w of this.windMeshes || []) {
+      w.mesh.material.opacity = 0.36 + 0.12 * Math.sin(this._time * 4 + w.mesh.position.x * 0.2 + w.mesh.position.z * 0.2);
     }
 
     for (const [key, vis] of this.edgePortalVisuals.entries()) {

@@ -33,6 +33,7 @@ export class Ghost {
     this.frightTimeLeft = 0;
     this.teleportCooldown = 0;
     this.recoverTimer = 0;
+    this.edgePortalLockKey = null;
     this._buildMesh();
     this._pickInitialDir();
     this.syncTransform(0);
@@ -192,7 +193,9 @@ export class Ghost {
       this.recoverTimer -= dt;
       if (this.recoverTimer <= 0) this.mode = 'chase';
     }
-    if (world) this.terrainMul = world.getSpeedMultiplier(this.face, this.cx + (this.next[0] - this.cx) * this.t, this.cy + (this.next[1] - this.cy) * this.t);
+    const hereKey = `${this.face}:${this.cx}:${this.cy}`;
+    if (this.edgePortalLockKey && this.edgePortalLockKey !== hereKey) this.edgePortalLockKey = null;
+    if (world) this.terrainMul = world.getSpeedMultiplier(this.face, this.cx + (this.next[0] - this.cx) * this.t, this.cy + (this.next[1] - this.cy) * this.t, this.dir[0], this.dir[1]);
     const cps = this.speed / CELL;
     this.t += cps * dt;
     while (this.t >= 1) {
@@ -248,7 +251,7 @@ export class Ghost {
 
   respawn() {
     this.face = this.home.face; this.cx = this.home.x; this.cy = this.home.y;
-    this.t = 0; this.mode = 'chase'; this.recoverTimer = 0; this._pickInitialDir();
+    this.t = 0; this.mode = 'chase'; this.recoverTimer = 0; this.teleportCooldown = 0; this.edgePortalLockKey = null; this._pickInitialDir();
     this.syncTransform(0);
   }
 }

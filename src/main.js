@@ -7,7 +7,7 @@ import {
   LIVES_START, SCORE, FRIGHT_TIME, GHOST_NAMES, HALF, MID, themeForLevel
 } from './config.js';
 import { FACE_IDS, FACE_ADJ } from './cube.js';
-import { generateWorld, isPath } from './maze.js';
+import { generateWorld } from './maze.js';
 import { World } from './world.js';
 import { Player } from './player.js';
 import { Ghost } from './ghost.js';
@@ -118,8 +118,8 @@ class Game {
     this.world.setActiveFaceImmediate(START_FACE);
     this.world.setTheme(theme);
 
-    const isWallFn = (face, x, y) => !isPath(this.worldData.faces[face], x, y);
-    const isPathFn = (face, x, y) => isPath(this.worldData.faces[face], x, y);
+    const isWallFn = (face, x, y) => this.world.isBlocked(face, x, y);
+    const isPathFn = (face, x, y) => this.world.isPassable(face, x, y);
 
     this.player = new Player(this.world.group, START_FACE, isWallFn);
 

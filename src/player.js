@@ -24,6 +24,7 @@ export class Player {
     this.teleportCooldown = 0;
     this.teleportLockKey = null;
     this.portalGrace = 0;
+    this.edgePortalLockKey = null;
 
     this._buildMesh();
     this.syncTransform();
@@ -206,6 +207,8 @@ export class Player {
   update(dt, move, world, cameraForwardWorld, cameraRightWorld) {
     this.teleportCooldown = Math.max(0, this.teleportCooldown - dt);
     this.portalGrace = Math.max(0, this.portalGrace - dt);
+    const hereKey = `${this.face}:${this.cellX}:${this.cellY}`;
+    if (this.edgePortalLockKey && this.edgePortalLockKey !== hereKey) this.edgePortalLockKey = null;
     let isMoving = false;
     if (!world.rotating) {
       const { f, s } = move;
@@ -215,7 +218,7 @@ export class Player {
         let du = desiredLocal.dot(FACES[this.face].r);
         let dv = desiredLocal.dot(FACES[this.face].u);
         const len = Math.hypot(du, dv) || 1;
-        const step = (PLAYER_SPEED * world.getSpeedMultiplier(this.face, this.u, this.v) / CELL) * dt;
+        const step = (PLAYER_SPEED * world.getSpeedMultiplier(this.face, this.u, this.v, du, dv) / CELL) * dt;
         du = du / len * step; dv = dv / len * step;
         this._desiredHeading = Math.atan2(du, dv);
         const diff = Math.atan2(Math.sin(this._desiredHeading - this.heading), Math.cos(this._desiredHeading - this.heading));
@@ -249,11 +252,15 @@ export class Player {
   }
 
   _checkCrossing(world) {
-    let edge = null;
-    if (this.u > GRID - 1 + 0.5 && Math.abs(this.v - MID) < 0.7) edge = 'R';
-    else if (this.u < -0.5 && Math.abs(this.v - MID) < 0.7) edge = 'L';
-    else if (this.v > GRID - 1 + 0.5 && Math.abs(this.u - MID) < 0.7) edge = 'T';
-    else if (this.v < -0.5 && Math.abs(this.u - MID) < 0.7) edge = 'B';
+    let edge = world.getEdgePortalEdge(this.face, this.cellX, this.cellY);
+    const lockKey = `${this.face}:${this.cellX}:${this.cellY}`;
+    if (edge && this.edgePortalLockKey === lockKey) edge = null;
+    if (!edge) {
+      if (this.u > GRID - 1 + 0.5 && Math.abs(this.v - MID) < 0.7) edge = 'R';
+      else if (this.u < -0.5 && Math.abs(this.v - MID) < 0.7) edge = 'L';
+      else if (this.v > GRID - 1 + 0.5 && Math.abs(this.u - MID) < 0.7) edge = 'T';
+      else if (this.v < -0.5 && Math.abs(this.u - MID) < 0.7) edge = 'B';
+    }
     if (!edge) return;
 
     const a = world.tryUseFacePortal('player', this.face, edge);
@@ -270,6 +277,7 @@ export class Player {
     this.heading = Math.atan2(a.heading[0], a.heading[1]);
     this.teleportCooldown = 0.5;
     this.portalGrace = 0.55;
+    this.edgePortalLockKey = `${this.face}:${Math.round(this.u)}:${Math.round(this.v)}`;
     world.startRotation(this.face);
     if (this.onCross) this.onCross();
   }
@@ -279,6 +287,7 @@ export class Player {
     this.teleportCooldown = 0;
     this.teleportLockKey = null;
     this.portalGrace = 0;
+    this.edgePortalLockKey = null;
     this.syncTransform();
   }
 }
