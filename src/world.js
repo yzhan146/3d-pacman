@@ -15,7 +15,7 @@ const FACE_EFFECT_PLAN = {
   PZ: 'teleport',
   NX: 'speed',
   NY: 'gate',
-  NZ: 'grass'
+  NZ: 'sanctuary'
 };
 const EDGE_PORTAL_COOLDOWN = 2.0;
 const GATE_OPEN_TIME = 2.0;
@@ -203,23 +203,16 @@ export class World {
       this.effects[faceId].phase = 0.7;
     }
 
-    // Grass patches on NZ
+    // Sanctuary pads on NZ
     {
       const faceId = 'NZ';
-      const grid = this.data.faces[faceId].grid;
-      const patches = [];
+      const sanctuaries = [];
       for (const anchor of [[2, 2], [GRID - 3, GRID - 3], [2, GRID - 3]]) {
         const seed = this._nearestPathCell(faceId, anchor[0], anchor[1]);
         if (!seed) continue;
-        const [sx, sy] = seed;
-        const cells = new Set();
-        for (const [dx, dy] of [[0,0],[1,0],[-1,0],[0,1],[0,-1]]) {
-          const x = sx + dx, y = sy + dy;
-          if (x >= 0 && x < GRID && y >= 0 && y < GRID && grid[y][x] === PATH) cells.add(this._cellKey(x, y));
-        }
-        patches.push({ cells });
+        sanctuaries.push({ cell: seed });
       }
-      this.effects[faceId].patches = patches;
+      this.effects[faceId].sanctuaries = sanctuaries;
     }
   }
 
@@ -424,29 +417,56 @@ export class World {
       this.gateMeshes.push(mesh);
     }
 
-    // Grass visuals (NZ)
-    this.grassMeshes = [];
-    const grassGeo = new THREE.ConeGeometry(CELL * 0.09, CELL * 0.34, 6);
-    for (const patch of this.effects.NZ?.patches || []) {
-      for (const key of patch.cells) {
-        const [x, y] = key.split(':').map(Number);
-        const f = FACES.NZ;
-        const base = faceGridToLocal('NZ', x, y, new THREE.Vector3());
-        for (let i = 0; i < 9; i++) {
-          const blade = new THREE.Mesh(grassGeo, new THREE.MeshStandardMaterial({
-            color: 0x63b56f, emissive: 0x1f4a22, emissiveIntensity: 0.06, roughness: 0.95, metalness: 0
-          }));
-          blade.position.copy(base)
-            .addScaledVector(f.r, (Math.random() - 0.5) * CELL * 0.5)
-            .addScaledVector(f.u, (Math.random() - 0.5) * CELL * 0.5)
-            .addScaledVector(f.n, 0.18);
-          blade.quaternion.setFromUnitVectors(UP, f.n);
-          blade.rotateOnAxis(new THREE.Vector3(0, 1, 0), Math.random() * Math.PI * 2);
-          blade.rotateOnAxis(new THREE.Vector3(1, 0, 0), (Math.random() - 0.5) * 0.35);
-          this.effectMeshes.add(blade);
-          this.grassMeshes.push(blade);
-        }
-      }
+    // Sanctuary visuals (NZ) - translucent protective domes
+    this.sanctuaryMeshes = [];
+    const domeGeo = new THREE.SphereGeometry(CELL * 0.44, 20, 14, 0, Math.PI * 2, 0, Math.PI / 2);
+    const ringGeo2 = new THREE.TorusGeometry(CELL * 0.42, 0.05, 10, 28);
+    for (const s of this.effects.NZ?.sanctuaries || []) {
+      const [x, y] = s.cell;
+      const f = FACES.NZ;
+      const base = faceGridToLocal('NZ', x, y, new THREE.Vector3());
+
+      const shell = new THREE.Mesh(domeGeo, new THREE.MeshStandardMaterial({
+        color: 0xaaf4ff,
+        emissive: 0x76ddff,
+        emissiveIntensity: 0.18,
+        roughness: 0.18,
+        metalness: 0,
+        transparent: true,
+        opacity: 0.24,
+        side: THREE.DoubleSide
+      }));
+      shell.position.copy(base).addScaledVector(f.n, 0.9);
+      shell.quaternion.setFromUnitVectors(UP, f.n);
+      this.effectMeshes.add(shell);
+
+      const ring = new THREE.Mesh(ringGeo2, new THREE.MeshStandardMaterial({
+        color: 0xbff7ff,
+        emissive: 0x7ae2ff,
+        emissiveIntensity: 0.35,
+        roughness: 0.22,
+        metalness: 0.05,
+        transparent: true,
+        opacity: 0.75
+      }));
+      ring.position.copy(base).addScaledVector(f.n, 0.08);
+      ring.quaternion.setFromUnitVectors(ZAX, f.n);
+      this.effectMeshes.add(ring);
+
+      const core = new THREE.Mesh(new THREE.CylinderGeometry(CELL * 0.16, CELL * 0.2, 0.08, 24), new THREE.MeshStandardMaterial({
+        color: 0xe2fbff,
+        emissive: 0x9cecff,
+        emissiveIntensity: 0.18,
+        roughness: 0.25,
+        metalness: 0,
+        transparent: true,
+        opacity: 0.55
+      }));
+      core.position.copy(base).addScaledVector(f.n, 0.05);
+      core.quaternion.setFromUnitVectors(UP, f.n);
+      this.effectMeshes.add(core);
+
+      this.sanctuaryMeshes.push({ shell, ring, core });
     }
 
     this.group.add(this.effectMeshes);
@@ -549,9 +569,9 @@ export class World {
 
   isHidden(faceId, u, v) {
     const fx = this.effects[faceId];
-    if (!fx || fx.type !== 'grass') return false;
+    if (!fx || fx.type !== 'sanctuary') return false;
     const key = this._cellKey(Math.round(u), Math.round(v));
-    return (fx.patches || []).some(p => p.cells.has(key));
+    return (fx.sanctuaries || []).some(s => this._cellKey(s.cell[0], s.cell[1]) === key);
   }
 
   tryTeleportPlayer(player) {
@@ -777,6 +797,15 @@ export class World {
       const rise = open ? 0.02 : 1;
       g.scale.y += (rise - g.scale.y) * Math.min(1, dt * 8);
       if (!open) g.material.emissiveIntensity = 0.18 + 0.08 * Math.sin(this._time * 5);
+    }
+
+    for (const s of this.sanctuaryMeshes || []) {
+      const pulse = 0.92 + 0.08 * Math.sin(this._time * 3.2);
+      s.shell.scale.setScalar(pulse);
+      s.shell.material.opacity = 0.2 + 0.05 * Math.sin(this._time * 2.4);
+      s.ring.rotation.z -= dt * 0.8;
+      s.ring.material.emissiveIntensity = 0.28 + 0.08 * Math.sin(this._time * 4.1);
+      s.core.material.opacity = 0.45 + 0.08 * Math.sin(this._time * 5.3);
     }
 
     for (const [key, vis] of this.edgePortalVisuals.entries()) {
