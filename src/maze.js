@@ -94,6 +94,11 @@ export function generateFace(seed) {
   // Do not put a pellet on the centre spawn cell.
   if (pellets[MID][MID] === DOT) { pellets[MID][MID] = 0; dotCount--; }
 
+  // Edge-portal cells are pure traversal devices: never place pellets on them.
+  for (const [px, py] of [[0, MID], [GRID - 1, MID], [MID, 0], [MID, GRID - 1]]) {
+    if (pellets[py][px] !== 0) { pellets[py][px] = 0; dotCount--; }
+  }
+
   for (const [px, py] of pickPowerCells(grid, rnd)) {
     if (pellets[py][px] === DOT) { pellets[py][px] = POWER; /* count stays: still a pellet to clear */ }
     else if (pellets[py][px] === 0 && grid[py][px] === PATH) { pellets[py][px] = POWER; dotCount++; }

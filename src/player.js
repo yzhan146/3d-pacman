@@ -272,12 +272,12 @@ export class Player {
       return;
     }
     this.face = a.face;
-    this.u = a.cell[0] + a.heading[0] * 0.5;
-    this.v = a.cell[1] + a.heading[1] * 0.5;
+    this.u = a.cell[0] + a.heading[0] * 1.05;
+    this.v = a.cell[1] + a.heading[1] * 1.05;
     this.heading = Math.atan2(a.heading[0], a.heading[1]);
     this.teleportCooldown = 0.5;
     this.portalGrace = 0.55;
-    this.edgePortalLockKey = `${this.face}:${Math.round(this.u)}:${Math.round(this.v)}`;
+    this.edgePortalLockKey = null;
     world.startRotation(this.face);
     if (this.onCross) this.onCross();
   }

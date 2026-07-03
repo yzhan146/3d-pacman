@@ -227,6 +227,7 @@ class Game {
 
   _handleCollisions() {
     const pp = this.player.getWorldPosition(new THREE.Vector3());
+    if (this.world.isHidden(this.player.face, this.player.u, this.player.v)) return;
     const gp = new THREE.Vector3();
     for (const g of this.ghosts) {
       g.getWorldPosition(gp);
@@ -260,7 +261,8 @@ class Game {
       if (this.state !== 'playing') { /* level cleared during eat */ }
       else {
         const flash = this.frightTimer > 0 && this.frightTimer < 2.2;
-        for (const g of this.ghosts) g.update(dt, this.player, flash, this.reviveGrace, this.world);
+        const hidden = this.world.isHidden(this.player.face, this.player.u, this.player.v);
+        for (const g of this.ghosts) g.update(dt, this.player, flash, this.reviveGrace || hidden, this.world);
         this._handleCollisions();
         if (this.frightTimer > 0) {
           this.frightTimer -= dt;

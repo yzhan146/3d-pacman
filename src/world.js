@@ -15,7 +15,7 @@ const FACE_EFFECT_PLAN = {
   PZ: 'teleport',
   NX: 'speed',
   NY: 'gate',
-  NZ: 'wind'
+  NZ: 'grass'
 };
 const EDGE_PORTAL_COOLDOWN = 2.0;
 const GATE_OPEN_TIME = 2.0;
@@ -180,6 +180,7 @@ export class World {
       for (const y0 of [2, GRID - 3]) {
         const cells = new Set();
         for (let x = 1; x < GRID - 1; x++) {
+          if (Math.abs(x - MID) <= 1) continue; // keep cross-plane portal approaches clean
           for (let y = Math.max(0, y0 - 1); y <= Math.min(GRID - 1, y0 + 1); y++) {
             if (grid[y][x] === PATH) cells.add(this._cellKey(x, y));
           }
@@ -202,20 +203,23 @@ export class World {
       this.effects[faceId].phase = 0.7;
     }
 
-    // Wind corridors on NZ
+    // Grass patches on NZ
     {
       const faceId = 'NZ';
       const grid = this.data.faces[faceId].grid;
-      const zones = [];
-      const left = new Set();
-      const right = new Set();
-      for (let y = 1; y < GRID - 1; y++) {
-        for (let x = 1; x <= 3; x++) if (grid[y][x] === PATH) left.add(this._cellKey(x, y));
-        for (let x = GRID - 4; x < GRID - 1; x++) if (grid[y][x] === PATH) right.add(this._cellKey(x, y));
+      const patches = [];
+      for (const anchor of [[2, 2], [GRID - 3, GRID - 3], [2, GRID - 3]]) {
+        const seed = this._nearestPathCell(faceId, anchor[0], anchor[1]);
+        if (!seed) continue;
+        const [sx, sy] = seed;
+        const cells = new Set();
+        for (const [dx, dy] of [[0,0],[1,0],[-1,0],[0,1],[0,-1]]) {
+          const x = sx + dx, y = sy + dy;
+          if (x >= 0 && x < GRID && y >= 0 && y < GRID && grid[y][x] === PATH) cells.add(this._cellKey(x, y));
+        }
+        patches.push({ cells });
       }
-      zones.push({ cells: left, dir: [0, 1] });
-      zones.push({ cells: right, dir: [0, -1] });
-      this.effects[faceId].zones = zones;
+      this.effects[faceId].patches = patches;
     }
   }
 
@@ -385,18 +389,17 @@ export class World {
       }
     }
 
-    // Speed strip visuals (NX)
-    const speedMat = new THREE.MeshStandardMaterial({
-      color: 0x78e4ff, emissive: 0x3bc9ff, emissiveIntensity: 0.22,
-      roughness: 0.35, metalness: 0.05, transparent: true, opacity: 0.82
-    });
-    const speedGeo = new THREE.BoxGeometry(CELL * 0.9, 0.1, CELL * 0.9);
+    // Speed strip visuals (NX): cool hex energy cells
+    const speedGeo = new THREE.CylinderGeometry(CELL * 0.28, CELL * 0.28, 0.06, 6);
     for (const strip of this.effects.NX?.strips || []) {
       for (const key of strip.cells) {
         const [x, y] = key.split(':').map(Number);
         const f = FACES.NX;
         const base = faceGridToLocal('NX', x, y, new THREE.Vector3());
-        const mesh = new THREE.Mesh(speedGeo, speedMat);
+        const mesh = new THREE.Mesh(speedGeo, new THREE.MeshStandardMaterial({
+          color: 0x7ce6ff, emissive: 0x44cfff, emissiveIntensity: 0.18,
+          roughness: 0.28, metalness: 0.02, transparent: true, opacity: 0.82
+        }));
         mesh.position.copy(base).addScaledVector(f.n, 0.06);
         mesh.quaternion.setFromUnitVectors(UP, f.n);
         this.effectMeshes.add(mesh);
@@ -414,29 +417,35 @@ export class World {
         color: 0xffc870, emissive: 0xffb34d, emissiveIntensity: 0.2,
         roughness: 0.3, metalness: 0.1, transparent: true, opacity: 0.9
       }));
-      mesh.position.copy(base).addScaledVector(f.n, WALL_HEIGHT * 0.48);
+      mesh.position.copy(base).addScaledVector(f.n, 0.02);
       mesh.quaternion.setFromUnitVectors(UP, f.n);
+      mesh.scale.y = 0.02;
       this.effectMeshes.add(mesh);
       this.gateMeshes.push(mesh);
     }
 
-    // Wind visuals (NZ)
-    this.windMeshes = [];
-    const windGeo = new THREE.BoxGeometry(CELL * 0.5, 0.04, CELL * 0.5);
-    const windMat = new THREE.MeshStandardMaterial({
-      color: 0xa6f6ff, emissive: 0x56d8ff, emissiveIntensity: 0.12,
-      roughness: 0.5, metalness: 0, transparent: true, opacity: 0.5
-    });
-    for (const zone of this.effects.NZ?.zones || []) {
-      for (const key of zone.cells) {
+    // Grass visuals (NZ)
+    this.grassMeshes = [];
+    const grassGeo = new THREE.ConeGeometry(CELL * 0.09, CELL * 0.34, 6);
+    for (const patch of this.effects.NZ?.patches || []) {
+      for (const key of patch.cells) {
         const [x, y] = key.split(':').map(Number);
         const f = FACES.NZ;
         const base = faceGridToLocal('NZ', x, y, new THREE.Vector3());
-        const mesh = new THREE.Mesh(windGeo, windMat);
-        mesh.position.copy(base).addScaledVector(f.n, 0.04);
-        mesh.quaternion.setFromUnitVectors(UP, f.n);
-        this.effectMeshes.add(mesh);
-        this.windMeshes.push({ mesh, dir: zone.dir });
+        for (let i = 0; i < 9; i++) {
+          const blade = new THREE.Mesh(grassGeo, new THREE.MeshStandardMaterial({
+            color: 0x63b56f, emissive: 0x1f4a22, emissiveIntensity: 0.06, roughness: 0.95, metalness: 0
+          }));
+          blade.position.copy(base)
+            .addScaledVector(f.r, (Math.random() - 0.5) * CELL * 0.5)
+            .addScaledVector(f.u, (Math.random() - 0.5) * CELL * 0.5)
+            .addScaledVector(f.n, 0.18);
+          blade.quaternion.setFromUnitVectors(UP, f.n);
+          blade.rotateOnAxis(new THREE.Vector3(0, 1, 0), Math.random() * Math.PI * 2);
+          blade.rotateOnAxis(new THREE.Vector3(1, 0, 0), (Math.random() - 0.5) * 0.35);
+          this.effectMeshes.add(blade);
+          this.grassMeshes.push(blade);
+        }
       }
     }
 
@@ -535,17 +544,14 @@ export class World {
       for (const strip of fx.strips || []) if (strip.cells.has(key)) return 1.65;
       return 1;
     }
-    if (fx.type === 'wind') {
-      const len = Math.hypot(du, dv) || 1;
-      for (const zone of fx.zones || []) {
-        if (zone.cells.has(key)) {
-          const align = (du / len) * zone.dir[0] + (dv / len) * zone.dir[1];
-          return THREE.MathUtils.clamp(1 + align * 0.55, 0.5, 1.55);
-        }
-      }
-      return 1;
-    }
     return 1;
+  }
+
+  isHidden(faceId, u, v) {
+    const fx = this.effects[faceId];
+    if (!fx || fx.type !== 'grass') return false;
+    const key = this._cellKey(Math.round(u), Math.round(v));
+    return (fx.patches || []).some(p => p.cells.has(key));
   }
 
   tryTeleportPlayer(player) {
@@ -767,12 +773,10 @@ export class World {
 
     for (const g of this.gateMeshes || []) {
       const open = this._gateOpen('NY');
-      g.visible = !open;
+      g.visible = true;
+      const rise = open ? 0.02 : 1;
+      g.scale.y += (rise - g.scale.y) * Math.min(1, dt * 8);
       if (!open) g.material.emissiveIntensity = 0.18 + 0.08 * Math.sin(this._time * 5);
-    }
-
-    for (const w of this.windMeshes || []) {
-      w.mesh.material.opacity = 0.36 + 0.12 * Math.sin(this._time * 4 + w.mesh.position.x * 0.2 + w.mesh.position.z * 0.2);
     }
 
     for (const [key, vis] of this.edgePortalVisuals.entries()) {
