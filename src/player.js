@@ -7,6 +7,8 @@ import { GRID, MID, CELL, PLAYER_RADIUS, PLAYER_SPEED, COLORS } from './config.j
 import { FACES, faceGridToLocal, crossEdge } from './cube.js';
 
 const RC = PLAYER_RADIUS / CELL;
+const COLLISION_RC = RC * 0.84; // slightly forgiving collision radius for smoother corners
+const CORNER_ASSIST = 0.14;     // tiny auto-centering nudge when scraping corners
 
 export class Player {
   constructor(group, startFace, isWallFn) {
@@ -125,27 +127,61 @@ export class Player {
     return this.isWall(this.face, x, y);
   }
 
-  _resolveX(nu, v) {
-    const yLo = Math.floor(v - RC + 0.5), yHi = Math.floor(v + RC + 0.5);
-    if (nu > this.u) {
-      const cx = Math.floor(nu + RC + 0.5);
-      for (let y = yLo; y <= yHi; y++) if (this._cellWall(cx, y)) return cx - 0.5 - RC - 1e-4;
-    } else if (nu < this.u) {
-      const cx = Math.floor(nu - RC + 0.5);
-      for (let y = yLo; y <= yHi; y++) if (this._cellWall(cx, y)) return cx + 0.5 + RC + 1e-4;
+  _overlapsWall(u, v, rc = COLLISION_RC) {
+    const minX = Math.floor(u - rc - 1);
+    const maxX = Math.floor(u + rc + 1);
+    const minY = Math.floor(v - rc - 1);
+    const maxY = Math.floor(v + rc + 1);
+    for (let y = minY; y <= maxY; y++) {
+      for (let x = minX; x <= maxX; x++) {
+        if (!this._cellWall(x, y)) continue;
+        const left = x - 0.5, right = x + 0.5;
+        const bottom = y - 0.5, top = y + 0.5;
+        const nx = Math.max(left, Math.min(u, right));
+        const ny = Math.max(bottom, Math.min(v, top));
+        const dx = u - nx;
+        const dy = v - ny;
+        if (dx * dx + dy * dy < rc * rc - 1e-6) return true;
+      }
     }
-    return nu;
+    return false;
+  }
+
+  _resolveX(nu, v) {
+    if (!this._overlapsWall(nu, v)) return nu;
+    let lo = this.u, hi = nu;
+    for (let i = 0; i < 8; i++) {
+      const mid = (lo + hi) * 0.5;
+      if (this._overlapsWall(mid, v)) hi = mid;
+      else lo = mid;
+    }
+    return lo;
   }
   _resolveY(nv, u) {
-    const xLo = Math.floor(u - RC + 0.5), xHi = Math.floor(u + RC + 0.5);
-    if (nv > this.v) {
-      const cy = Math.floor(nv + RC + 0.5);
-      for (let x = xLo; x <= xHi; x++) if (this._cellWall(x, cy)) return cy - 0.5 - RC - 1e-4;
-    } else if (nv < this.v) {
-      const cy = Math.floor(nv - RC + 0.5);
-      for (let x = xLo; x <= xHi; x++) if (this._cellWall(x, cy)) return cy + 0.5 + RC + 1e-4;
+    if (!this._overlapsWall(u, nv)) return nv;
+    let lo = this.v, hi = nv;
+    for (let i = 0; i < 8; i++) {
+      const mid = (lo + hi) * 0.5;
+      if (this._overlapsWall(u, mid)) hi = mid;
+      else lo = mid;
     }
-    return nv;
+    return lo;
+  }
+
+  _applyCornerAssist(blockedX, blockedY, du, dv) {
+    // If we are mainly trying to move vertically but clipping a corner on X, gently
+    // nudge toward the nearest lane centre so the player can "squeeze" through.
+    if (blockedX && Math.abs(dv) > Math.abs(du) * 0.6) {
+      const targetU = Math.round(this.u);
+      const candidate = this.u + Math.max(-CORNER_ASSIST, Math.min(CORNER_ASSIST, targetU - this.u));
+      if (!this._overlapsWall(candidate, this.v)) this.u = candidate;
+    }
+    // Symmetric case for horizontal motion grazing a corner on Y.
+    if (blockedY && Math.abs(du) > Math.abs(dv) * 0.6) {
+      const targetV = Math.round(this.v);
+      const candidate = this.v + Math.max(-CORNER_ASSIST, Math.min(CORNER_ASSIST, targetV - this.v));
+      if (!this._overlapsWall(this.u, candidate)) this.v = candidate;
+    }
   }
 
   syncTransform() {
@@ -178,8 +214,13 @@ export class Player {
         this._desiredHeading = Math.atan2(du, dv);
         const diff = Math.atan2(Math.sin(this._desiredHeading - this.heading), Math.cos(this._desiredHeading - this.heading));
         this.heading += diff * Math.min(1, dt * 14);
+        const prevU = this.u;
+        const prevV = this.v;
         this.u = this._resolveX(this.u + du, this.v);
+        const blockedX = Math.abs(this.u - (prevU + du)) > 1e-4;
         this.v = this._resolveY(this.v + dv, this.u);
+        const blockedY = Math.abs(this.v - (prevV + dv)) > 1e-4;
+        if (blockedX || blockedY) this._applyCornerAssist(blockedX, blockedY, du, dv);
         this.mouth = (this.mouth + dt * 8) % (Math.PI * 2);
         isMoving = true;
       }
