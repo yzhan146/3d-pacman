@@ -40,12 +40,12 @@ export const FRIGHT_FLASH = 0xffffff;
 export const CUBE_ROT_TIME = 0.55;      // seconds for a face-to-face world rotation
 
 export const FACE_STYLES = [
-  { name: 'Sun',    wallTint: 0xffc24d, floorTint: 0x1b1320, icon: 'sun',    iconColor: '#ffd26a' },
-  { name: 'Leaf',   wallTint: 0x58d68d, floorTint: 0x0d1813, icon: 'leaf',   iconColor: '#8ef0b1' },
-  { name: 'Flower', wallTint: 0xff7eb8, floorTint: 0x190d18, icon: 'flower', iconColor: '#ffc6e1' },
-  { name: 'Moon',   wallTint: 0x9eb6ff, floorTint: 0x0d1222, icon: 'moon',   iconColor: '#d7e2ff' },
-  { name: 'Star',   wallTint: 0xff9a5a, floorTint: 0x1a1109, icon: 'star',   iconColor: '#ffd0a8' },
-  { name: 'Bird',   wallTint: 0x63d9ff, floorTint: 0x09171d, icon: 'bird',   iconColor: '#b7f3ff' }
+  { name: 'Slate',  wallTint: 0x6f82b7, floorTint: 0x12182a, icon: 'sun',    iconColor: '#b8c7ef' },
+  { name: 'Moss',   wallTint: 0x5d8d7d, floorTint: 0x101914, icon: 'leaf',   iconColor: '#b0d6c8' },
+  { name: 'Plum',   wallTint: 0x8b6f96, floorTint: 0x17131c, icon: 'flower', iconColor: '#d4c0dd' },
+  { name: 'Steel',  wallTint: 0x6f97a8, floorTint: 0x10181d, icon: 'moon',   iconColor: '#c1d8e1' },
+  { name: 'Amber',  wallTint: 0xa28361, floorTint: 0x1a1510, icon: 'star',   iconColor: '#dbc7b0' },
+  { name: 'Teal',   wallTint: 0x5e87a1, floorTint: 0x0e171c, icon: 'bird',   iconColor: '#b5d1df' }
 ];
 
 // Per-level visual themes + difficulty ramp (cycles for endless levels).
