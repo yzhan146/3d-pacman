@@ -122,7 +122,7 @@ export class Ghost {
     return { cross: null, cell: [clamp(tx), clamp(ty)] };
   }
 
-  _decide(player, safeMode = false) {
+  _decide(player, safeMode = false, world = null) {
     // Eaten: go home (route across faces).
     if (this.mode === 'eaten') {
       if (this.face === this.home.face && this.cx === this.home.x && this.cy === this.home.y) {
@@ -130,7 +130,7 @@ export class Ghost {
         this.recoverTimer = 1.5;
       } else if (this.face !== this.home.face) {
         const edge = FACE_NEXT_HOP[this.face][this.home.face];
-        if (cellPortalEdge(this.cx, this.cy) === edge) return this._cross(edge);
+        if (cellPortalEdge(this.cx, this.cy) === edge) return this._cross(edge, world);
         return this._greedy(edgeInfo(this.face, edge).mid);
       } else {
         return this._greedy([this.home.x, this.home.y]);
@@ -141,7 +141,7 @@ export class Ghost {
     if (this.mode === 'frightened') return this._random();
 
     const tgt = this._target(player);
-    if (tgt.cross && cellPortalEdge(this.cx, this.cy) === tgt.cross) return this._cross(tgt.cross);
+    if (tgt.cross && cellPortalEdge(this.cx, this.cy) === tgt.cross) return this._cross(tgt.cross, world);
     return this._greedy(tgt.cell);
   }
 
@@ -175,8 +175,9 @@ export class Ghost {
     if (o) { this.dir = o.d.slice(); this.next = [o.nx, o.ny]; }
   }
 
-  _cross(edge) {
-    const a = crossEdge(this.face, edge);
+  _cross(edge, world = null) {
+    const a = world ? world.tryUseFacePortal('ghost', this.face, edge) : crossEdge(this.face, edge);
+    if (!a) return this._random();
     this.face = a.face;
     this.cx = a.cell[0]; this.cy = a.cell[1];
     this.dir = a.heading.slice();
@@ -198,7 +199,7 @@ export class Ghost {
       this.t -= 1;
       this.cx = this.next[0]; this.cy = this.next[1];
       if (world) world.tryTeleportGhost(this);
-      this._decide(player, safeMode);
+      this._decide(player, safeMode, world);
     }
     this.syncTransform(this.t);
 

@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import {
   CELL, HALF, WALL_HEIGHT, COLORS, CUBE_ROT_TIME, GRID, FACE_STYLES
 } from './config.js';
-import { FACE_IDS, FACES, faceGridToLocal, CANON_QUAT, EDGES, edgeInfo } from './cube.js';
+import { FACE_IDS, FACES, faceGridToLocal, CANON_QUAT, EDGES, edgeInfo, crossEdge } from './cube.js';
 import { PATH, DOT, POWER } from './maze.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -14,6 +14,7 @@ const FACE_EFFECT_PLAN = {
   PX: 'mud',
   PZ: 'teleport'
 };
+const EDGE_PORTAL_COOLDOWN = 0.9;
 
 function makeGridTexture(baseColor) {
   const s = 256;
@@ -69,6 +70,7 @@ export class World {
 
     this.effects = {};
     this._initFaceEffects();
+    this.edgePortalState = new Map();
 
     this.remaining = worldData.totalDots;
     this.faceRemaining = {};
@@ -87,6 +89,11 @@ export class World {
   }
 
   _cellKey(x, y) { return `${x}:${y}`; }
+  _edgePortalKey(faceId, edge) {
+    const a = FACES[faceId].n;
+    const b = edgeInfo(faceId, edge).neighborNormal;
+    return [`${a.x},${a.y},${a.z}`, `${b.x},${b.y},${b.z}`].sort().join('|');
+  }
 
   _nearestPathCell(faceId, ax, ay, used = null) {
     const grid = this.data.faces[faceId].grid;
@@ -247,6 +254,7 @@ export class World {
 
   _buildFaceEffects() {
     this.effectMeshes = new THREE.Group();
+    this.teleportMeshes = [];
 
     // Mud visuals
     const mudMat = new THREE.MeshStandardMaterial({
@@ -320,6 +328,7 @@ export class World {
         rim.position.copy(base).addScaledVector(f.n, 0.16);
         rim.quaternion.setFromUnitVectors(ZAX, f.n);
         this.effectMeshes.add(rim);
+        this.teleportMeshes.push({ hole, core, rim });
       }
     }
 
@@ -393,14 +402,14 @@ export class World {
     if (!fx || fx.type !== 'teleport') return false;
     const key = this._cellKey(player.cellX, player.cellY);
     if (player.teleportLockKey && key !== player.teleportLockKey) player.teleportLockKey = null;
-    if (player.teleportCooldown > 0) return false;
     if (player.teleportLockKey === key) return false;
+    if (player.teleportCooldown > 0) return false;
     const dest = fx.map.get(key);
     if (!dest) return false;
     player.u = dest[0];
     player.v = dest[1];
     player.teleportLockKey = this._cellKey(dest[0], dest[1]);
-    player.teleportCooldown = 0.1;
+    player.teleportCooldown = 0.08;
     return true;
   }
 
@@ -413,6 +422,7 @@ export class World {
     // amber while the player is standing on it (a "step-on" feedback).
     this.portals = new THREE.Group();
     this.portalTiles = new Map();
+    this.edgePortalVisuals = new Map();
     this._activePortalKey = null;
     const geo = new THREE.BoxGeometry(CELL * 0.92, 0.5, CELL * 0.92);
     const q = new THREE.Quaternion();
@@ -431,9 +441,50 @@ export class World {
         tile.receiveShadow = true;
         this.portals.add(tile);
         this.portalTiles.set(`${id}:${mid[0]}:${mid[1]}`, tile);
+
+        const pairKey = this._edgePortalKey(id, e);
+        if (!this.edgePortalVisuals.has(pairKey)) {
+          const canvas = document.createElement('canvas');
+          canvas.width = canvas.height = 128;
+          const tex = new THREE.CanvasTexture(canvas);
+          tex.colorSpace = THREE.SRGBColorSpace;
+          const mat2 = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0.95 });
+          this.edgePortalVisuals.set(pairKey, { canvas, tex, progress: 0, meshes: [] });
+        }
+        const vis = this.edgePortalVisuals.get(pairKey);
+        const plane = new THREE.Mesh(new THREE.PlaneGeometry(CELL * 0.8, CELL * 0.8), vis.mat || (vis.mat = new THREE.MeshBasicMaterial({ map: vis.tex, transparent: true, depthWrite: false, opacity: 0.95 })));
+        plane.position.copy(base).addScaledVector(f.n, 0.34);
+        plane.quaternion.setFromUnitVectors(ZAX, f.n);
+        plane.visible = false;
+        vis.meshes.push(plane);
+        this.portals.add(plane);
       }
     }
     this.group.add(this.portals);
+  }
+
+  _drawCooldownCanvas(canvas, progress) {
+    const ctx = canvas.getContext('2d');
+    const s = canvas.width;
+    ctx.clearRect(0, 0, s, s);
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+    ctx.lineWidth = 10;
+    ctx.beginPath();
+    ctx.arc(s / 2, s / 2, s * 0.28, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = '#ffd21a';
+    ctx.lineWidth = 12;
+    ctx.beginPath();
+    ctx.arc(s / 2, s / 2, s * 0.28, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+    ctx.stroke();
+  }
+
+  tryUseFacePortal(kind, faceId, edge) {
+    const pairKey = this._edgePortalKey(faceId, edge);
+    const state = this.edgePortalState.get(pairKey);
+    if (state && state.cooldown > 0) return null;
+    this.edgePortalState.set(pairKey, { cooldown: EDGE_PORTAL_COOLDOWN, by: kind });
+    return crossEdge(faceId, edge);
   }
 
   // Highlight the portal tile the player is standing on (amber), reset others.
@@ -539,6 +590,27 @@ export class World {
       this.powInst.setMatrixAt(pd.idx, this._dummy.matrix);
     }
     this.powInst.instanceMatrix.needsUpdate = true;
+
+    for (const t of this.teleportMeshes || []) {
+      t.rim.rotation.z += dt * 2.2;
+      const pulse = 0.9 + 0.12 * Math.sin(this._time * 4.5);
+      t.core.scale.set(1, 0.45 * pulse, 1);
+      t.hole.scale.set(1, 0.5 + 0.08 * Math.sin(this._time * 3.8), 1);
+    }
+
+    for (const [key, vis] of this.edgePortalVisuals.entries()) {
+      const state = this.edgePortalState.get(key);
+      if (state && state.cooldown > 0) {
+        state.cooldown = Math.max(0, state.cooldown - dt);
+        const p = state.cooldown / EDGE_PORTAL_COOLDOWN;
+        this._drawCooldownCanvas(vis.canvas, p);
+        vis.tex.needsUpdate = true;
+        vis.meshes.forEach(m => { m.visible = true; });
+        if (state.cooldown <= 0) {
+          vis.meshes.forEach(m => { m.visible = false; });
+        }
+      }
+    }
   }
 
   _powerRegByIdx(idx) {
