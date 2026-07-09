@@ -9,8 +9,8 @@ export const HALF = FACE_SIZE / 2;      // distance from cube center to a face p
 export const WALL_HEIGHT = 3.2;
 export const PLAYER_RADIUS = 1.35;
 export const PLAYER_SPEED = 17;         // world units / sec
-export const GHOST_SPEED = 11;          // world units / sec (cell-based movement)
-export const GHOST_FRIGHT_SPEED = 6.5;
+export const GHOST_SPEED = 8.8;         // 20% slower for a more forgiving chase
+export const GHOST_FRIGHT_SPEED = 5.2;  // 20% slower while frightened
 export const FRIGHT_TIME = 7.5;         // seconds of frightened mode
 export const LIVES_START = 3;
 

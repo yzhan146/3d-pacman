@@ -53,7 +53,8 @@ class Game {
       this.hud.jumpLv2HudBtn?.addEventListener('click', () => this.jumpToLevel(2));
     }
     window.addEventListener('keydown', (e) => {
-      if (e.code !== 'Escape') return;
+      if (e.code !== 'Escape' && e.code !== 'KeyP') return;
+      if (e.repeat) return;
       if (this.state === 'playing' || this.state === 'ready' || this.state === 'paused') {
         e.preventDefault();
         this.togglePause();
@@ -204,6 +205,7 @@ class Game {
   pauseGame() {
     this.stateBeforePause = this.state;
     this.state = 'paused';
+    this.input.resetMovement();
     this.hud.showPauseOverlay();
     if (document.pointerLockElement) document.exitPointerLock();
   }
@@ -380,7 +382,6 @@ class Game {
     const { dx, dy } = this.input.consumeMouse();
     const move = this.input.moveVector();
     if (this.player) this.followCam.applyInput(dx, dy);
-    this.followCam.setLookBehind(this.input.lookBehindActive());
     if (this.state !== 'paused') {
       this.background.update(dt);
       this.world && this.world.update(dt, this.player, this.ghosts);
